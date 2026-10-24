@@ -9,6 +9,7 @@
 | 세션 | 추출 파일 | 원본 JSONL |
 |---|---|---|
 | 1 계획 (2026-10-24) | `prompts/raw/20261024-1946-4c4877c2-ac86-4edc-a5dd-b6669d286238.md` | 로컬 보관만 (`.gitignore` — 전체 대화·로컬 경로·이메일 포함) |
+| 2 코드 (2026-10-24) | `prompts/raw/20261024-2149-5a6fcc88-ef84-40d4-8be6-8e3c0d26f8b8.md` | 로컬 보관만 (같은 이유) |
 
 ## 프롬프트 큐레이션 (2층)
 
@@ -172,3 +173,20 @@
 - `caveman` 플러그인 (세션 훅으로 상시 활성) — 응답 문체를 간결하게 만들어 긴 토론에서 토큰과 읽는 시간을 줄이는 데 사용
 - WebSearch 도구 — 배포처 요금·한도 비교(Render 무료 Postgres 30일 만료, Railway 요금, 클라우드타입, AWS Lightsail), Spring Boot 버전별 지원 종료일 확인(3.5 EOL → 4.1 선택), Bucket4j starter의 Boot 4 호환성 확인(확인되지 않아 core 사용으로 결정)에 사용. 2차 자료가 섞여 있어 배포 세션이 공식 문서로 재확인하도록 DESIGN.md §14에 명시
 - Bash / Read / Write 도구 — 과제 문서 읽기, `CONSIDERATIONS.md`·`docs/DESIGN.md` 작성·수정, 1층 프롬프트 추출(`jq`)에 사용
+
+### 세션 2 — 코드
+- `superpowers:executing-plans` 스킬 — `docs/DESIGN.md` §13 태스크 1~8(+문서화 9)을 순서대로 실행하고 태스크마다 멈춰 사람 확인을 받는 체크포인트 진행에 사용. 시작 전 설계 검토로 빈틈 4개(없는 경로 code, 로컬 저장 경로, 브랜치, IMPL_NOTES)를 먼저 질문
+- `andrej-karpathy-skills:karpathy-guidelines` 스킬 — 가정을 드러내고(설계와 다른 점은 구현 전에 보고), 태스크별 완료 기준을 DESIGN §12 케이스로 명시하고, 변경을 요청 범위로 한정하는 기준으로 사용
+- `ponytail` 플러그인 (세션 훅으로 상시 활성) — 추상화·의존성 억제 기준. 예: 저장소·rate limit 인터페이스 없음, DTO 별도 패키지 없음, 프론트 템플릿의 lint 도구·샘플 asset 제거(런타임 의존성 react·react-dom 2개), 프로필 파일 대신 환경변수 1개
+- `caveman` 플러그인 (세션 훅으로 상시 활성) — 체크포인트 보고를 간결하게 유지
+- `superpowers:using-superpowers` (세션 시작 훅) — 작업 전 해당 스킬을 먼저 불러오는 규칙
+- `superpowers:finishing-a-development-branch` 스킬 — 구현 완료 후 빌드 확인 → merge/PR/보류 선택지 제시에 사용(테스트 스위트는 테스트 세션 몫이라 빌드 통과로 대체한다고 명시)
+- `claude-in-chrome` 스킬 + MCP 도구(navigate·find·file_upload·javascript_tool·screenshot) — Task 7 프론트 UX 규칙을 실제 브라우저에서 확인(새로고침 영속, 요청 중 disabled, XSS 파일명 텍스트 렌더링, 10MB 초과 시 요청 미발생, 200개 상한 UI). fetch를 감싸 요청 발생 여부·지연을 관찰
+- start.spring.io (curl) — Boot 4.1.2의 모듈화된 starter 좌표를 공식 생성기로 확인(DESIGN §2의 "Boot 3 패턴 금지" 대응). 생성된 테스트 파일은 삭제
+- Maven Central 검색 API (curl) — Bucket4j 좌표·버전 확인(`bucket4j_jdk17-core/caffeine` 8.14.0)
+- `javap` / `jshell` (JDK 21) — Bucket4j Caffeine API를 jar에서 직접 확인하고 실행 검증. **설계의 `expireAfterAccess`가 `IllegalStateException`을 내는 것을 발견** → 사람 승인 후 리필 기반 만료로 변경(CONSIDERATIONS A-15)
+- scratchpad 임시 `main` (javac/java) — Task 3 순수 함수의 T1·T2 케이스 수동 확인(테스트 코드는 레포에 넣지 않음)
+- Docker / docker compose / `psql`(컨테이너 안) — 로컬 Postgres, Flyway 결과·DB 제약·감사 행 확인, 동시성 확인 중 `LOCK TABLE` 보유, 멀티스테이지 이미지 빌드·non-root·힙 상한 확인
+- curl (병렬 실행 포함) + Python `http.client` — API 시나리오, 동시 요청, XFF 위조, 경로 변형, curl이 퍼센트 인코딩하는 파일명(개행 등)을 raw multipart로 전송
+- Vite `create-vite` 템플릿(react-ts) — 프론트 스캐폴딩 후 불필요 파일 제거
+- Bash / Read / Write / Edit 도구 — 코드·문서 작성, CONSIDERATIONS append, 기능 단위 커밋

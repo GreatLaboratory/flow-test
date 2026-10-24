@@ -479,3 +479,14 @@
 - **인계 (배포 세션)**: Railway Postgres가 주는 `DATABASE_URL`은 `postgresql://user:pass@host:port/db` 형식이라 JDBC URL이 아니다. `SPRING_DATASOURCE_URL=jdbc:postgresql://${PGHOST}:${PGPORT}/${PGDATABASE}` + `SPRING_DATASOURCE_USERNAME/PASSWORD`로 각각 연결할 것.
 - **이미지 빌드는 테스트를 돌리지 않는다**(`bootJar`만). Testcontainers 테스트는 Docker 안에서 Docker가 필요해 이미지 빌드 단계와 맞지 않는다 → 테스트는 CI/로컬에서 별도 실행.
 - _코드 세션_
+
+### A-22. 파일 크기 한도와 요청 크기 한도가 연결되어 있지 않음 `[+]` — 📝 알려진 한계
+- **사실**: `spring.servlet.multipart.max-file-size`는 `app.upload.max-file-size`를 참조하지만 `max-request-size`는 `11MB` 고정값이다(설계 §9 "파일 크기보다 약간 크게"). `APP_UPLOAD_MAX_FILE_SIZE`를 예컨대 50MB로 올리면 **요청 한도 11MB가 먼저 걸리고**, 응답 메시지는 "최대 50MB"라고 안내하는 불일치가 생긴다. 프론트도 `maxFileSize`(50MB)를 믿고 11MB 초과 파일을 보낸다.
+- **추가**: 메시지의 `{max}`는 `toMegabytes()`라 1MB 미만 한도(예: 512KB)는 "0MB"로 표시된다.
+- **판단**: 기본 설정(10MB)에서는 문제없고, 한도를 바꾸는 시나리오는 현재 없다. 바꿀 때 `max-request-size`도 함께 조정하라는 사실을 기록으로 남긴다. 고치려면 `max-request-size`를 별도 환경변수로 노출하거나 `-1`(파일당 제한만 사용)로 두는 방안이 있다 — 1개 파일 정책이라 후자도 성립.
+- _코드 세션_
+
+### A-23. 로컬 Docker 엔진 버전과 Testcontainers `[+]` — 📝 테스트 세션 확인 필요
+- **사실**: 이 머신은 Docker CLI를 29.9.2로 올렸지만 **엔진은 20.10.7(API 1.41)** 그대로였다(Docker Desktop 미재시작 추정). 앱 실행·compose·이미지 빌드는 정상 동작했다.
+- **위험**: Testcontainers가 쓰는 docker-java가 더 높은 최소 API 버전을 요구하면 테스트 세션에서 컨테이너 기동이 실패할 수 있다. 실패 시 코드가 아니라 Docker Desktop 재시작/업그레이드로 해결.
+- _코드 세션_
