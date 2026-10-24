@@ -9,6 +9,7 @@
 | 세션 | 추출 파일 | 원본 JSONL |
 |---|---|---|
 | 1 계획 (2026-10-24) | `prompts/raw/20261024-1946-4c4877c2-ac86-4edc-a5dd-b6669d286238.md` | 로컬 보관만 (`.gitignore` — 전체 대화·로컬 경로·이메일 포함) |
+| 2 코드 (2026-10-24) | `prompts/raw/20261024-2149-5a6fcc88-ef84-40d4-8be6-8e3c0d26f8b8.md` | 로컬 보관만 (같은 이유) |
 
 ## 프롬프트 큐레이션 (2층)
 
@@ -162,6 +163,42 @@
 
 ---
 
+### [코드 세션] 2026-10-24
+
+> **세션 성격**: 설계 결정은 계획 세션에서 끝났고, 이 세션은 `docs/DESIGN.md` §13 태스크를 하나씩 구현한 뒤 **체크포인트마다 사람이 승인**하는 방식으로 진행됐다. 1층 원본 14개 중 대부분은 "task N 넘어가자" 형태의 승인이다. 아래는 그중 사람이 실제로 판단한 3건과, 검증 과정에서 결함이 드러난 3건이다.
+
+#### 사람 판단
+
+##### C1. [20:38] 시작 시 agent가 제기한 설계 구멍 4개에 답함
+- **프롬프트**: "로컬 5432 쓸 수 있도록 방금 mealscope-postgres 삭제했어. gradle과 psql은 로컬에 다운로드 받아도 돼. 설계의 구멍 질문들은 전부 너의 제안대로 가자."
+- **맥락**: agent가 구현 전에 설계를 검토해 4가지를 질문했다. ① 없는 경로에 쓸 error code가 §5-3 목록에 없음 ② 기본 저장 경로 `/data/uploads`는 로컬 macOS에서 쓰기 불가 ③ `main` 브랜치에서 바로 작업할지 ④ `IMPL_NOTES.md` 작성 여부. 각각 agent 제안을 붙였다.
+- **판단 (그대로)**: 4개 모두 agent 제안을 채택했다(`NOT_FOUND` 추가 → CONSIDERATIONS A-3, 환경변수로 덮어쓰기 → A-2, `feat/implementation` 브랜치, IMPL_NOTES 작성). 사람이 추가로 한 것은 로컬 환경 정리다: 포트 5432를 쓰던 다른 컨테이너를 삭제하고 도구 설치를 허용했다.
+- **의미**: 빈틈이 구현 중에 임의로 메워지지 않고, 코드를 쓰기 전에 사람 결정으로 확정됐다.
+
+##### C2. [21:42] 배포 세션 인계 주의점이 기록됐는지 확인
+- **프롬프트**: "배포 세션에 넘길 주의점은 어디에 기록해뒀어?"
+- **의도**: Task 8 보고에 "배포 세션에 넘길 주의점"이 나왔는데, 그게 실제로 다음 세션이 읽을 곳에 있는지 확인.
+- **결과**: 확인해 보니 주의점이 `CONSIDERATIONS.md` 부록 4곳(A-1, A-13, A-17, A-21)에 흩어져 있어 배포 세션이 놓치기 쉬운 상태였다. → `docs/IMPL_NOTES.md` §8에 세션별 체크리스트로 모으기로 했다.
+
+##### C3. [21:44] "design.md 는 수정하지마. impl_notes.md 면 충분해."
+- **맥락**: C2 직후 agent가 IMPL_NOTES 정리와 함께 `DESIGN.md` §14에 포인터 한 줄을 추가하는 안도 제안했다.
+- **판단 (고쳐)**: 포인터 추가안을 기각. 설계 문서는 계획 세션 산출물로 고정하고, 구현 단계의 변경·인계는 IMPL_NOTES에만 쓴다는 원칙을 사람이 강제했다.
+
+#### ★ 하이라이트 — 검증 과정이 설계·코드 결함을 잡은 것 (agent가 발견, 사람이 승인)
+
+> 아래 3건은 **사람이 잡은 것이 아니다.** agent가 구현·검증하는 과정에서 드러났고, 사람은 보고를 받아 승인했다. 상세는 `docs/IMPL_NOTES.md` §3과 `CONSIDERATIONS.md` 부록 A.
+
+| # | 무엇 | 어떻게 드러났나 | 사람의 역할 |
+|---|---|---|---|
+| A-15 | 설계 §7-3의 Caffeine `expireAfterAccess(10분)`이 Bucket4j 8.14와 함께 쓰면 `IllegalStateException` → **설계대로는 앱이 동작하지 않음** | Task 6 구현 전 jshell로 실제 라이브러리를 실행해 재현 | agent가 코드 작성 전에 멈추고 대안(리필 기반 만료)을 보고 → [21:25] "오케이 그 방향으로 가자"로 승인 |
+| A-6 | 끝의 점·공백 제거 정규식을 `[. ]+$`로 쓰면 `$`가 마지막 개행 앞에서도 매치되어 `file.exe.\n`이 **차단을 빠져나감** | Task 3 작성 중 발견, `\z`로 작성하고 그 케이스를 수동 확인 목록에 넣어 통과 확인 | Task 3 체크포인트 보고 후 "넘어가자"로 승인 |
+| A-9 | 설계 §7-1의 `existsFixed(id)`(boolean)로는 감사 기록과 응답에 필요한 **확장자 이름을 얻을 수 없음** | Task 4 구현 중 계약의 빈틈 발견 → `findFixedById`로 변경, 동시 PUT 5개에서 감사 1행으로 원자성 유지 확인 | Task 4 체크포인트 보고 후 "넘어가자"로 승인 |
+
+#### 1층 추출 누락분
+- 1층 추출(21:49) 이후에 보낸 이 큐레이션 지시 프롬프트는 추출본에 없다. 다음 추출 때 포함된다.
+
+---
+
 ## 스킬 / 플러그인 / 도구 사용 기록 (가이드 4-2)
 
 ### 세션 1 — 계획
@@ -172,3 +209,20 @@
 - `caveman` 플러그인 (세션 훅으로 상시 활성) — 응답 문체를 간결하게 만들어 긴 토론에서 토큰과 읽는 시간을 줄이는 데 사용
 - WebSearch 도구 — 배포처 요금·한도 비교(Render 무료 Postgres 30일 만료, Railway 요금, 클라우드타입, AWS Lightsail), Spring Boot 버전별 지원 종료일 확인(3.5 EOL → 4.1 선택), Bucket4j starter의 Boot 4 호환성 확인(확인되지 않아 core 사용으로 결정)에 사용. 2차 자료가 섞여 있어 배포 세션이 공식 문서로 재확인하도록 DESIGN.md §14에 명시
 - Bash / Read / Write 도구 — 과제 문서 읽기, `CONSIDERATIONS.md`·`docs/DESIGN.md` 작성·수정, 1층 프롬프트 추출(`jq`)에 사용
+
+### 세션 2 — 코드
+- `superpowers:executing-plans` 스킬 — `docs/DESIGN.md` §13 태스크 1~8(+문서화 9)을 순서대로 실행하고 태스크마다 멈춰 사람 확인을 받는 체크포인트 진행에 사용. 시작 전 설계 검토로 빈틈 4개(없는 경로 code, 로컬 저장 경로, 브랜치, IMPL_NOTES)를 먼저 질문
+- `andrej-karpathy-skills:karpathy-guidelines` 스킬 — 가정을 드러내고(설계와 다른 점은 구현 전에 보고), 태스크별 완료 기준을 DESIGN §12 케이스로 명시하고, 변경을 요청 범위로 한정하는 기준으로 사용
+- `ponytail` 플러그인 (세션 훅으로 상시 활성) — 추상화·의존성 억제 기준. 예: 저장소·rate limit 인터페이스 없음, DTO 별도 패키지 없음, 프론트 템플릿의 lint 도구·샘플 asset 제거(런타임 의존성 react·react-dom 2개), 프로필 파일 대신 환경변수 1개
+- `caveman` 플러그인 (세션 훅으로 상시 활성) — 체크포인트 보고를 간결하게 유지
+- `superpowers:using-superpowers` (세션 시작 훅) — 작업 전 해당 스킬을 먼저 불러오는 규칙
+- `superpowers:finishing-a-development-branch` 스킬 — 구현 완료 후 빌드 확인 → merge/PR/보류 선택지 제시에 사용(테스트 스위트는 테스트 세션 몫이라 빌드 통과로 대체한다고 명시)
+- `claude-in-chrome` 스킬 + MCP 도구(navigate·find·file_upload·javascript_tool·screenshot) — Task 7 프론트 UX 규칙을 실제 브라우저에서 확인(새로고침 영속, 요청 중 disabled, XSS 파일명 텍스트 렌더링, 10MB 초과 시 요청 미발생, 200개 상한 UI). fetch를 감싸 요청 발생 여부·지연을 관찰
+- start.spring.io (curl) — Boot 4.1.2의 모듈화된 starter 좌표를 공식 생성기로 확인(DESIGN §2의 "Boot 3 패턴 금지" 대응). 생성된 테스트 파일은 삭제
+- Maven Central 검색 API (curl) — Bucket4j 좌표·버전 확인(`bucket4j_jdk17-core/caffeine` 8.14.0)
+- `javap` / `jshell` (JDK 21) — Bucket4j Caffeine API를 jar에서 직접 확인하고 실행 검증. **설계의 `expireAfterAccess`가 `IllegalStateException`을 내는 것을 발견** → 사람 승인 후 리필 기반 만료로 변경(CONSIDERATIONS A-15)
+- scratchpad 임시 `main` (javac/java) — Task 3 순수 함수의 T1·T2 케이스 수동 확인(테스트 코드는 레포에 넣지 않음)
+- Docker / docker compose / `psql`(컨테이너 안) — 로컬 Postgres, Flyway 결과·DB 제약·감사 행 확인, 동시성 확인 중 `LOCK TABLE` 보유, 멀티스테이지 이미지 빌드·non-root·힙 상한 확인
+- curl (병렬 실행 포함) + Python `http.client` — API 시나리오, 동시 요청, XFF 위조, 경로 변형, curl이 퍼센트 인코딩하는 파일명(개행 등)을 raw multipart로 전송
+- Vite `create-vite` 템플릿(react-ts) — 프론트 스캐폴딩 후 불필요 파일 제거
+- Bash / Read / Write / Edit 도구 — 코드·문서 작성, CONSIDERATIONS append, 기능 단위 커밋

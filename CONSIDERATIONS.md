@@ -372,3 +372,121 @@
 
 ## 부록. 이후 세션 append 영역
 > 형식: `### 제목 [+] — ✅/⛔/🔀` · 근거 · 발견 세션
+
+### A-1. 로컬 개발 환경의 Docker Compose 버전 요구 `[+]` — 📝 명시
+- **사실**: `spring-boot-docker-compose` 4.1.2는 기동 시 `docker compose version --format json` 출력을 JSON으로 파싱한다. 오래된 Docker Desktop(Compose `2.0.0-beta.4`)은 출력에 개행을 `\n` 문자열 그대로 찍어 `StreamReadException`으로 **bootRun 자체가 실패**한다.
+- **대응**: Docker CLI/Compose 업그레이드(확인: CLI 29.9.2, Compose v5.6.1). 앱 코드 변경 없음. README 실행법에 "최신 Docker Desktop 필요"를 명시할 것(마감 세션).
+- _코드 세션_
+
+### A-2. 로컬 실행 시 업로드 저장 경로 `[+]` — 🔀 환경변수로 덮어쓰기
+- **사실**: 기본값 `/data/uploads`는 macOS 로컬에서 쓰기 권한이 없다.
+- **판단**: 기본값은 운영(컨테이너) 기준으로 유지하고, 로컬은 `APP_UPLOAD_STORAGE_DIR=./uploads`로 덮어쓴다. 프로필 파일(`application-local.yml`)은 값 1개 때문에 만들지 않는다. `backend/.gitignore`에 `uploads/` 추가.
+- _코드 세션_
+
+### A-3. 설계 목록에 없던 에러 code: 없는 경로, 프레임워크 4xx `[+]` — 🔀 `NOT_FOUND` 1개 추가 + 나머지는 `INVALID_REQUEST`로 통일
+- **빈틈**: §5-3 ErrorCode 목록에 "없는 경로"용 code가 없었다(`EXTENSION_NOT_FOUND`는 의미가 다름). `/actuator/env` 404도 여기에 해당.
+- **결정**: `NOT_FOUND`(404, "요청한 경로를 찾을 수 없습니다.") 추가. 잘못된 JSON·405·415·경로 변수 타입 불일치 등 Spring MVC가 던지는 4xx는 전부 `INVALID_REQUEST`(400).
+- **감수한 비용**: 405/415가 400으로 뭉개진다. 프론트는 이 code들로 분기할 일이 없고, code 목록을 작게 유지하는 쪽을 택했다(사람 승인).
+- _코드 세션_
+
+### A-4. 프로토콜 수준 잘못된 요청은 §5-1 형식이 아님 `[+]` — 📝 명시
+- **사실**: 요청 라인 자체가 깨진 요청(예: 메서드에 공백 포함)은 Spring에 도달하기 전에 Tomcat이 HTML 400을 응답한다. `@RestControllerAdvice` 밖이다.
+- **판단**: 정상 클라이언트(브라우저/프론트)는 만들 수 없는 요청이고, 응답에 서버 버전·스택은 포함되지 않음을 확인했다. 수용.
+- _코드 세션_
+
+### A-5. `client_ip`도 45자에서 절단 `[+]` — ✅ 구현함
+- **근거**: `getRemoteAddr()`는 보통 정상 IP지만, 감사 INSERT가 정책 변경과 같은 트랜잭션이라 길이 초과 한 번이 **정책 변경까지 롤백**시킨다(`VARCHAR(45)`를 고른 것과 같은 근거). UA 512자 절단과 같은 1줄 처리.
+- _코드 세션_
+
+### A-6. 정규식 `$`는 "끝"이 아니다 — 끝의 점 제거를 `\z`로 `[+]` — ✅ 구현함
+- **발견**: Java 정규식 `$`는 문자열 끝 **또는 마지막 개행 직전**에서도 매치된다. `[. ]+$`로 쓰면 `file.exe.\n`이 `file.exe\n`이 되어 마지막 구간이 `exe\n` → **차단을 빠져나간다.** `\z`(진짜 끝)를 쓰면 `exe` 구간이 그대로 남아 차단된다.
+- **판단**: 개행 파일명 자체는 위협 모델 밖(1-11)이지만, 같은 길이의 코드에서 엣지케이스에 올바른 쪽을 택했다. 수동 확인 케이스에 포함.
+- _코드 세션_
+
+### A-7. 255자는 코드포인트 기준으로 센다 `[+]` — ✅ 구현함
+- **근거**: `String.length()`는 UTF-16 단위라 이모지 같은 보조 평면 문자를 2자로 센다. 설계의 "문자 수 기준"에 맞춰 `codePointCount`를 사용(1줄).
+- _코드 세션_
+
+### A-8. `BLOCKED_CONTENT`의 `matched` 값 `[+]` — 📝 명시
+- **결정**: 내용 차단 시 `matched`에는 "현재 차단 중인 PE 계열 확장자"(예: `[com, exe]`, 정렬)를 담는다. 어떤 정책 항목 때문에 막혔는지 로그·응답에서 추적할 수 있게 하기 위함.
+- _코드 세션_
+
+### A-9. 리포지토리 계약 변경: `existsFixed` → `findFixedById` `[+]` — 🔀 다르게 처리함
+- **빈틈**: §7-1의 `updateFixedBlocked`는 행 수만 반환하는데, 감사 기록(`extension_name`)과 응답(`{id,name,blocked}`)에는 **이름이 필요**하다. `existsFixed`(boolean)로는 둘 다 채울 수 없다.
+- **결정**: 조건부 UPDATE 직후 같은 트랜잭션에서 `findFixedById`로 행을 읽는다. 없으면 404, 있으면 그 행으로 감사·응답을 채운다. 쿼리 수는 설계와 같고(UPDATE + SELECT 1회), 조건부 UPDATE의 원자성(감사 중복 방지)은 그대로다 — 동시 PUT 5개에서 감사 1행 확인.
+- _코드 세션_
+
+### A-10. 실패한 INSERT도 id를 소비한다 `[+]` — 📝 명시
+- **사실**: `GENERATED ALWAYS AS IDENTITY`의 시퀀스 값은 롤백되지 않는다. 409·제약 위반으로 실패한 추가도 id를 하나씩 소비해 id에 빈 번호가 생긴다.
+- **판단**: id는 식별자일 뿐 순번 의미가 없다(정렬도 id 오름차순으로만 사용). 수용.
+- _코드 세션_
+
+### A-11. multipart가 아닌 업로드 요청 `[+]` — ✅ 구현함 (`MISSING_FILE`)
+- **위험**: 컨트롤러 파라미터를 `MultipartHttpServletRequest`로 받으면, JSON이나 본문 없는 요청에서 바인딩 예외가 나 500(`INTERNAL_ERROR`)이 될 수 있다.
+- **결정**: `HttpServletRequest`로 받아 `instanceof MultipartHttpServletRequest`가 아니면 "파일 없음"으로 보고 400 `MISSING_FILE`. 이름 없는 텍스트 필드 `file=plain`도 파일이 아니므로 `MISSING_FILE`(수동 확인).
+- _코드 세션_
+
+### A-12. 응답·details의 `fileName`은 basename `[+]` — 📝 명시
+- **결정**: 응답의 `fileName`·`details.fileName`은 경로를 뗀 이름(`C:\fakepath\a.exe` → `a.exe`). 사용자에게 의미 있는 이름이다. 로그의 `fileName`에는 **원본 그대로**를 남긴다(경로 포함 조작 시도 추적용).
+- _코드 세션_
+
+### A-13. 413이 실제로 브라우저에 도달하는가 `[+]` — 📝 T7에서 확인 필요
+- **관찰**: 로컬에서 curl로 11MB·30MB를 보내면 둘 다 413 `FILE_TOO_LARGE` JSON을 받았다(Tomcat이 응답을 먼저 쓰고 curl이 읽음). 설계가 우려한 "연결이 끊겨 413이 안 보이는" 현상은 **브라우저·Railway 프록시 경유**에서 나타날 수 있으므로 로컬 결과로 결론 내리지 않는다.
+- **판단**: 클라이언트 사전 크기 검사(§8)는 그대로 필수. 배포 후 T7에서 확인.
+- _코드 세션_
+
+### A-14. 판정용 읽기 실패와 저장 실패의 구분 `[+]` — 📝 명시
+- **결정**: 앞 2바이트 읽기(`readHead`) 실패는 Spring 임시 파일 문제라 서버 내부 오류 → 500 `INTERNAL_ERROR`(스택은 로그). 최종 저장(`Files.copy`) 실패만 500 `STORAGE_FAILED` + 부분 파일 삭제. 저장 폴더를 읽기 전용으로 바꿔 `STORAGE_FAILED`와 파일 개수 불변을 확인했다.
+- **기동 시 폴더 생성**: `FileStorage` 생성자에서 `createDirectories` — 만들 수 없으면 **앱 기동이 실패**한다(업로드가 전부 실패할 상태로 뜨는 것보다 빠르게 드러나는 쪽을 택함).
+- _코드 세션_
+
+### A-15. Bucket4j Caffeine 만료 설정: `expireAfterAccess` 불가 → 리필 기반 만료 `[+]` — 🔀 다르게 처리함 (사람 승인)
+- **발견**: 설계 §7-3의 `Caffeine.expireAfterAccess(10분)`은 Bucket4j 8.14 `CaffeineProxyManager`와 함께 쓰면 `IllegalStateException: Expiry may not be used with expiresAfterAccess`. ProxyManager가 캐시에 자체 `Expiry`를 건다(jshell로 재현).
+- **결정**: `maximumSize(100_000)` 유지 + `expirationAfterWrite(basedOnTimeForRefillingBucketUpToMax(10분))`. 버킷이 가득 찰 때까지의 시간 + 10분 뒤 제거. 가득 찬 버킷은 새 버킷과 상태가 같으므로 제거해도 제한이 풀리지 않는다. 설계 목적(IP 키 무한 증가 방지)은 그대로.
+- **AI 활용 메모**: 설계 단계 AI 제안을 그대로 쓰지 않고 실제 라이브러리 버전에서 실행 검증해 잡은 사례.
+- _코드 세션_
+
+### A-16. rate limit 경로 비교는 `getServletPath()` `[+]` — ✅ 구현함
+- **위험**: `getRequestURI()`는 디코딩·정규화 전 원문이다. 문자열 비교하면 `/api/uploads;x=1`, `//api//uploads`, `/api/./uploads`, `/api/%75ploads`처럼 **Spring은 같은 컨트롤러로 라우팅하지만 필터는 다르게 보는** 변형으로 제한을 우회할 수 있다.
+- **대응**: 디코딩·정규화되고 path parameter가 제거된 `getServletPath()`로 비교. 위 4가지 변형 모두 429 확인.
+- _코드 세션_
+
+### A-17. 신뢰 프록시 설정이 rate limit·감사 IP의 전제 `[+]` — 📝 배포 세션 확인 필수
+- **사실**: `RemoteIpValve`는 기본적으로 사설·루프백 대역을 신뢰 프록시로 본다. 로컬 확인 결과 `X-Forwarded-For: <위조>, 1.1.1.1`의 왼쪽 값을 바꿔도 키는 `1.1.1.1`로 유지됐고(위조 무력), 감사 IP도 프록시가 붙인 값(`4.4.4.4`)으로 기록됐다.
+- **배포 위험 두 방향**
+  1. Railway 프록시 IP가 신뢰 대역 **밖**이면 `getRemoteAddr()`가 프록시 IP가 되어 **모든 사용자가 버킷 하나를 공유** → 한 사람의 남용이 전원을 429로 막는다.
+  2. 신뢰 대역을 너무 넓히면 클라이언트가 보낸 XFF 값까지 믿게 되어 위조로 우회된다.
+- **확인 방법**: 배포 후 감사 행의 `client_ip`가 내 공인 IP인지, 서로 다른 네트워크에서 키가 분리되는지 확인. 필요 시 `server.tomcat.remoteip.internal-proxies`만 조정.
+- **부수 확인**: 한도를 넘은 IP의 30MB 업로드는 본문을 받기 전에 0.001초 만에 429 — 필터가 multipart 파싱 전에 판단함을 확인.
+- _코드 세션_
+
+### A-18. 클라이언트는 정규화한 값이 아니라 입력값 그대로 전송 `[+]` — ✅ 구현함
+- **결정**: `normalize.ts`는 사전 검사(형식·목록 중복)에만 쓰고, `POST`에는 사용자가 입력한 원문을 보낸다. 정규화의 기준은 서버 하나.
+- **근거**: JS `trim()`은 유니코드 공백(전각 공백 U+3000 등)까지 제거하지만 Java `String.trim()`은 U+0020 이하만 제거한다. 클라이언트가 정규화한 값을 보내면 서버 규칙을 우회한 값이 서버에 도달하는 경로가 생긴다. 원문을 보내면 두 규칙이 어긋나도 **결과는 서버 판정(400 메시지)으로 수렴**하고, 어긋남은 "사전 안내가 안 뜬다" 수준의 UX 차이로만 남는다.
+- _코드 세션_
+
+### A-19. 고정 확장자 충돌은 클라이언트에서 사전 검사하지 않음 `[+]` — ⛔ 의도적으로 제외함
+- **근거**: 설계 §8의 클라이언트 사전 검사 범위(정규화 규칙·목록 중복·상한)에 없고, 서버 409 메시지("위 체크박스를 사용하세요")가 이미 충분한 안내다. 클라이언트 규칙을 늘릴수록 서버와 어긋날 지점이 늘어난다. 브라우저에서 `exe` 입력 시 서버 메시지가 그대로 표시됨을 확인.
+- _코드 세션_
+
+### A-20. 재조회 실패 시 마지막 서버 상태를 유지 `[+]` — ✅ 구현함
+- **결정**: 탭 복귀·변경 후 재조회가 실패하면 화면을 비우지 않고 마지막으로 받은 서버 상태를 유지한 채 상단에 `NETWORK_ERROR` 메시지 + "다시 시도" 버튼을 띄운다. 최초 로딩 실패 시에만 목록 없이 메시지만 표시.
+- **근거**: 일시적 네트워크 오류로 관리 화면이 통째로 사라지면 사용자가 상태를 잃는다. 표시 중인 값이 오래됐을 수 있다는 사실은 에러 메시지로 알린다.
+- _코드 세션_
+
+### A-21. 컨테이너 실행 확인 결과와 배포 세션 인계 `[+]` — 📝 명시
+- **확인**: 512MB 메모리 제한 컨테이너에서 `-XX:MaxRAMPercentage=75` → 힙 상한 384MB. 실행 사용자 `uid=10001(app)`(non-root), `/data/uploads`는 app 소유이고 업로드 파일이 UUID 이름·app 소유로 생성. 같은 출처에서 `/`(React), `/assets/*`, `/api/**`, `/actuator/health` 동작, `/actuator/env` 404.
+- **인계 (배포 세션)**: Railway Postgres가 주는 `DATABASE_URL`은 `postgresql://user:pass@host:port/db` 형식이라 JDBC URL이 아니다. `SPRING_DATASOURCE_URL=jdbc:postgresql://${PGHOST}:${PGPORT}/${PGDATABASE}` + `SPRING_DATASOURCE_USERNAME/PASSWORD`로 각각 연결할 것.
+- **이미지 빌드는 테스트를 돌리지 않는다**(`bootJar`만). Testcontainers 테스트는 Docker 안에서 Docker가 필요해 이미지 빌드 단계와 맞지 않는다 → 테스트는 CI/로컬에서 별도 실행.
+- _코드 세션_
+
+### A-22. 파일 크기 한도와 요청 크기 한도가 연결되어 있지 않음 `[+]` — 📝 알려진 한계
+- **사실**: `spring.servlet.multipart.max-file-size`는 `app.upload.max-file-size`를 참조하지만 `max-request-size`는 `11MB` 고정값이다(설계 §9 "파일 크기보다 약간 크게"). `APP_UPLOAD_MAX_FILE_SIZE`를 예컨대 50MB로 올리면 **요청 한도 11MB가 먼저 걸리고**, 응답 메시지는 "최대 50MB"라고 안내하는 불일치가 생긴다. 프론트도 `maxFileSize`(50MB)를 믿고 11MB 초과 파일을 보낸다.
+- **추가**: 메시지의 `{max}`는 `toMegabytes()`라 1MB 미만 한도(예: 512KB)는 "0MB"로 표시된다.
+- **판단**: 기본 설정(10MB)에서는 문제없고, 한도를 바꾸는 시나리오는 현재 없다. 바꿀 때 `max-request-size`도 함께 조정하라는 사실을 기록으로 남긴다. 고치려면 `max-request-size`를 별도 환경변수로 노출하거나 `-1`(파일당 제한만 사용)로 두는 방안이 있다 — 1개 파일 정책이라 후자도 성립.
+- _코드 세션_
+
+### A-23. 로컬 Docker 엔진 버전과 Testcontainers `[+]` — 📝 테스트 세션 확인 필요
+- **사실**: 이 머신은 Docker CLI를 29.9.2로 올렸지만 **엔진은 20.10.7(API 1.41)** 그대로였다(Docker Desktop 미재시작 추정). 앱 실행·compose·이미지 빌드는 정상 동작했다.
+- **위험**: Testcontainers가 쓰는 docker-java가 더 높은 최소 API 버전을 요구하면 테스트 세션에서 컨테이너 기동이 실패할 수 있다. 실패 시 코드가 아니라 Docker Desktop 재시작/업그레이드로 해결.
+- _코드 세션_
