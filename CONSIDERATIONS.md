@@ -410,3 +410,13 @@
 ### A-8. `BLOCKED_CONTENT`의 `matched` 값 `[+]` — 📝 명시
 - **결정**: 내용 차단 시 `matched`에는 "현재 차단 중인 PE 계열 확장자"(예: `[com, exe]`, 정렬)를 담는다. 어떤 정책 항목 때문에 막혔는지 로그·응답에서 추적할 수 있게 하기 위함.
 - _코드 세션_
+
+### A-9. 리포지토리 계약 변경: `existsFixed` → `findFixedById` `[+]` — 🔀 다르게 처리함
+- **빈틈**: §7-1의 `updateFixedBlocked`는 행 수만 반환하는데, 감사 기록(`extension_name`)과 응답(`{id,name,blocked}`)에는 **이름이 필요**하다. `existsFixed`(boolean)로는 둘 다 채울 수 없다.
+- **결정**: 조건부 UPDATE 직후 같은 트랜잭션에서 `findFixedById`로 행을 읽는다. 없으면 404, 있으면 그 행으로 감사·응답을 채운다. 쿼리 수는 설계와 같고(UPDATE + SELECT 1회), 조건부 UPDATE의 원자성(감사 중복 방지)은 그대로다 — 동시 PUT 5개에서 감사 1행 확인.
+- _코드 세션_
+
+### A-10. 실패한 INSERT도 id를 소비한다 `[+]` — 📝 명시
+- **사실**: `GENERATED ALWAYS AS IDENTITY`의 시퀀스 값은 롤백되지 않는다. 409·제약 위반으로 실패한 추가도 id를 하나씩 소비해 id에 빈 번호가 생긴다.
+- **판단**: id는 식별자일 뿐 순번 의미가 없다(정렬도 id 오름차순으로만 사용). 수용.
+- _코드 세션_
