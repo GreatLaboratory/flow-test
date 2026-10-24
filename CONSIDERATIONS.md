@@ -439,3 +439,23 @@
 - **결정**: 앞 2바이트 읽기(`readHead`) 실패는 Spring 임시 파일 문제라 서버 내부 오류 → 500 `INTERNAL_ERROR`(스택은 로그). 최종 저장(`Files.copy`) 실패만 500 `STORAGE_FAILED` + 부분 파일 삭제. 저장 폴더를 읽기 전용으로 바꿔 `STORAGE_FAILED`와 파일 개수 불변을 확인했다.
 - **기동 시 폴더 생성**: `FileStorage` 생성자에서 `createDirectories` — 만들 수 없으면 **앱 기동이 실패**한다(업로드가 전부 실패할 상태로 뜨는 것보다 빠르게 드러나는 쪽을 택함).
 - _코드 세션_
+
+### A-15. Bucket4j Caffeine 만료 설정: `expireAfterAccess` 불가 → 리필 기반 만료 `[+]` — 🔀 다르게 처리함 (사람 승인)
+- **발견**: 설계 §7-3의 `Caffeine.expireAfterAccess(10분)`은 Bucket4j 8.14 `CaffeineProxyManager`와 함께 쓰면 `IllegalStateException: Expiry may not be used with expiresAfterAccess`. ProxyManager가 캐시에 자체 `Expiry`를 건다(jshell로 재현).
+- **결정**: `maximumSize(100_000)` 유지 + `expirationAfterWrite(basedOnTimeForRefillingBucketUpToMax(10분))`. 버킷이 가득 찰 때까지의 시간 + 10분 뒤 제거. 가득 찬 버킷은 새 버킷과 상태가 같으므로 제거해도 제한이 풀리지 않는다. 설계 목적(IP 키 무한 증가 방지)은 그대로.
+- **AI 활용 메모**: 설계 단계 AI 제안을 그대로 쓰지 않고 실제 라이브러리 버전에서 실행 검증해 잡은 사례.
+- _코드 세션_
+
+### A-16. rate limit 경로 비교는 `getServletPath()` `[+]` — ✅ 구현함
+- **위험**: `getRequestURI()`는 디코딩·정규화 전 원문이다. 문자열 비교하면 `/api/uploads;x=1`, `//api//uploads`, `/api/./uploads`, `/api/%75ploads`처럼 **Spring은 같은 컨트롤러로 라우팅하지만 필터는 다르게 보는** 변형으로 제한을 우회할 수 있다.
+- **대응**: 디코딩·정규화되고 path parameter가 제거된 `getServletPath()`로 비교. 위 4가지 변형 모두 429 확인.
+- _코드 세션_
+
+### A-17. 신뢰 프록시 설정이 rate limit·감사 IP의 전제 `[+]` — 📝 배포 세션 확인 필수
+- **사실**: `RemoteIpValve`는 기본적으로 사설·루프백 대역을 신뢰 프록시로 본다. 로컬 확인 결과 `X-Forwarded-For: <위조>, 1.1.1.1`의 왼쪽 값을 바꿔도 키는 `1.1.1.1`로 유지됐고(위조 무력), 감사 IP도 프록시가 붙인 값(`4.4.4.4`)으로 기록됐다.
+- **배포 위험 두 방향**
+  1. Railway 프록시 IP가 신뢰 대역 **밖**이면 `getRemoteAddr()`가 프록시 IP가 되어 **모든 사용자가 버킷 하나를 공유** → 한 사람의 남용이 전원을 429로 막는다.
+  2. 신뢰 대역을 너무 넓히면 클라이언트가 보낸 XFF 값까지 믿게 되어 위조로 우회된다.
+- **확인 방법**: 배포 후 감사 행의 `client_ip`가 내 공인 IP인지, 서로 다른 네트워크에서 키가 분리되는지 확인. 필요 시 `server.tomcat.remoteip.internal-proxies`만 조정.
+- **부수 확인**: 한도를 넘은 IP의 30MB 업로드는 본문을 받기 전에 0.001초 만에 429 — 필터가 multipart 파싱 전에 판단함을 확인.
+- _코드 세션_
