@@ -441,7 +441,7 @@ frontend/src/
 | `server.port` | `${PORT:8080}` | `PORT` | Railway 주입 |
 | `spring.datasource.*` | — | `SPRING_DATASOURCE_URL/USERNAME/PASSWORD` | Railway Postgres 변수 연결 |
 
-`spring.servlet.multipart.max-request-size`는 파일 크기보다 약간 크게(예: 11MB) — multipart 경계·헤더 오버헤드.
+multipart 요청 한도 = `app.upload.max-file-size` + 1MB(경계·헤더 오버헤드)로 **자동 연동**한다(`MultipartConfigElement` 빈). 원래는 `max-request-size: 11MB` 고정값이었으나, 파일 한도를 올리면 메시지·`maxFileSize`와 실제 거절 지점이 어긋나는 것을 테스트 세션이 발견(VERIFICATION B2). `-1`(무제한)은 Tomcat `max-part-count` 기본 50 때문에 요청당 임시 디스크가 50배까지 커져 기각.
 `management.endpoints.web.exposure.include=health`, `management.endpoint.health.show-details=never`.
 
 ---
