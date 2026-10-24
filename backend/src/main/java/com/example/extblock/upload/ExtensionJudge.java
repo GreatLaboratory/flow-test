@@ -39,6 +39,9 @@ public final class ExtensionJudge {
 
 		// 첫 구간(파일명 본체)을 제외한 모든 구간을 확장자로 본다: a.exe.txt → {exe, txt}, .env → {env}, exe.txt → {txt}
 		String trimmed = TRAILING_DOTS_SPACES.matcher(baseName).replaceAll("");
+		if (trimmed.isEmpty()) {
+			return new Verdict(ErrorCode.INVALID_FILENAME, baseName, List.of()); // ".." "..." ". ." "   " = 파일명 없음과 같다
+		}
 		List<String> matched = Arrays.stream(trimmed.split("\\."))
 			.skip(1)
 			.map(segment -> segment.toLowerCase(Locale.ROOT))

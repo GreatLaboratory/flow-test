@@ -209,6 +209,7 @@ COMMIT;
 2. base = 마지막 '/' 또는 '\' 뒤                  (경로 포함 파일명 대응)
 3. base 길이 == 0 또는 > 255                     → INVALID_FILENAME
 4. trimmed = base 끝의 '.'·' ' 반복 제거          (Windows가 file.exe. → file.exe로 저장)
+4a. trimmed 길이 == 0                             → INVALID_FILENAME  (`..` `...` `. .` `"   "` = 파일명 없음과 같다)
 5. segments = trimmed.split('.') 에서 첫 구간 제외, 각 구간 소문자화, 빈 구간 제외
       a.exe.txt → {exe, txt} · .env → {env} · Makefile → {} · exe.txt → {txt}
 6. matched = segments ∩ blocked                  비어있지 않으면 → BLOCKED_EXTENSION (우선)
@@ -221,6 +222,7 @@ COMMIT;
 - `head`는 최대 2바이트, 길이 0·1이어도 예외 없이 처리.
 - 확장자와 내용이 모두 해당하면 **`BLOCKED_EXTENSION` 우선** — 사용자가 이해하기 쉬운 사유.
 - 0바이트 파일은 통과(차단 사유 없음).
+- **4a단계 추가 (테스트 세션, 2026-10-24)**: 독립 테스트가 스펙 순서 결함을 발견했다. 원래 순서는 빈 값 검사(3단계)가 끝 정리(4단계)보다 **앞에만** 있어서, 정리 후 빈 이름이 되는 `...` 같은 파일명이 통과·저장됐다(구현은 스펙을 그대로 따랐음). 사람이 "파일명 없음과 같다"로 판정 → 4a 추가. 근거: `docs/VERIFICATION.md` B1, `CONSIDERATIONS.md` A-24.
 
 ### 6-2. 커스텀 입력 정규화 — `ExtensionNormalizer.normalize(raw)`
 
