@@ -9,6 +9,14 @@ spring:
 
 server:
   port: ${PORT:8080}
+  # Tomcat RemoteIpValve: 신뢰하는 프록시가 붙인 X-Forwarded-For만 getRemoteAddr()에 반영
+  forward-headers-strategy: native
+
+logging:
+  structured:
+    format:
+      # JSON 한 줄 출력. 파일명 속 개행도 이스케이프되어 로그 인젝션이 성립하지 않음
+      console: ecs
 
 management:
   endpoints:
