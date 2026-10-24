@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { getExtensions, messageOf } from './api'
 import type { ExtensionView } from './types'
 import FixedExtensionPanel from './components/FixedExtensionPanel'
@@ -9,13 +9,18 @@ export default function App() {
   const [view, setView] = useState<ExtensionView | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
 
-  // 서버가 기준: 변경 성공 후·탭 복귀 시 전체 재조회
+  // 서버가 기준: 변경 성공 후·탭 복귀 시 전체 재조회.
+  // 재조회끼리 겹치면 마지막에 시작한 요청만 반영한다 — 변경 전 상태를 읽은 느린 응답이 새 상태를 덮어쓰지 않게(§7-17)
+  const latest = useRef(0)
   const reload = useCallback(async () => {
+    const seq = ++latest.current
     try {
-      setView(await getExtensions())
+      const next = await getExtensions()
+      if (seq !== latest.current) return
+      setView(next)
       setLoadError(null)
     } catch (e) {
-      setLoadError(messageOf(e))
+      if (seq === latest.current) setLoadError(messageOf(e))
     }
   }, [])
 
