@@ -1,6 +1,5 @@
 # Default ignored files
-/shelf/
-/.idea/workspace.xml
+/.idea/
 # Editor-based HTTP Client requests
 /httpRequests/
 # Ignored default folder with query files
@@ -9,3 +8,5 @@
 /dataSources/
 /dataSources.local.xml
 AGENT_PROMPTS.md
+# Raw Claude Code session logs (contain full transcript, local paths, email) — commit only extracted .md
+prompts/raw/*.jsonl
