@@ -1,0 +1,39 @@
+== 2026-10-24 22:41:06 KST backend: ./gradlew cleanTest test
+BUILD SUCCESSFUL in 15s
+  ConfiguredLimitsTest       tests=5 skipped=0 failures=0 errors=0
+  ConcurrencyTest            tests=7 skipped=0 failures=0 errors=0
+  ExtensionNormalizerTest    tests=25 skipped=0 failures=0 errors=0
+  PolicyApiTest              tests=27 skipped=0 failures=0 errors=0
+  ExtensionJudgeTest         tests=56 skipped=0 failures=0 errors=0
+  UploadApiTest              tests=16 skipped=0 failures=0 errors=0
+  TOTAL tests=136 failed=0
+== frontend: npm test
+ Test Files  1 passed (1)
+      Tests  26 passed (26)
+== frontend: npm run build
+
+✓ built in 101ms
+vitest exit=0
+build exit=0
+
+== 2026-10-24 KST §7-17 재검증 (App.reload 요청 순번 적용 후, 브라우저 지연 주입 — VERIFICATION §3 스크립트)
+수정 전: GET#0 서버응답 319ms → 화면반영 1821ms / PUT 897→930 / GET#2 930→945 → DB exe=false, 화면 checked=true  (불일치, 7-17_stale_ui_checked.png)
+수정 후 1회: GET#0 12370 → 13871 / PUT 12949→13086 / GET#2 13086→13094 → DB exe=false(감사 FIXED_UNBLOCK), 화면 checked=false (일치)
+수정 후 반복 3회: [{"round":0,"before":false,"uiAfter":true,"dbAfter":true,"match":true},{"round":1,"before":true,"uiAfter":false,"dbAfter":false,"match":true},{"round":2,"before":false,"uiAfter":true,"dbAfter":true,"match":true}]
+
+== 2026-10-24 22:51:47 KST 최종 재실행 (§7-17 수정 포함) — backend: ./gradlew cleanTest test
+gradle exit=0
+BUILD SUCCESSFUL in 15s
+  ConfiguredLimitsTest       tests=5 failures=0 errors=0
+  ConcurrencyTest            tests=7 failures=0 errors=0
+  ExtensionNormalizerTest    tests=25 failures=0 errors=0
+  PolicyApiTest              tests=27 failures=0 errors=0
+  ExtensionJudgeTest         tests=56 failures=0 errors=0
+  UploadApiTest              tests=16 failures=0 errors=0
+  TOTAL tests=136 failed=0
+== frontend: npm test
+vitest exit=0
+ Test Files  1 passed (1)
+      Tests  26 passed (26)
+== frontend: npm run build
+build exit=0
