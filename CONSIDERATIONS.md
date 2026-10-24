@@ -420,3 +420,22 @@
 - **사실**: `GENERATED ALWAYS AS IDENTITY`의 시퀀스 값은 롤백되지 않는다. 409·제약 위반으로 실패한 추가도 id를 하나씩 소비해 id에 빈 번호가 생긴다.
 - **판단**: id는 식별자일 뿐 순번 의미가 없다(정렬도 id 오름차순으로만 사용). 수용.
 - _코드 세션_
+
+### A-11. multipart가 아닌 업로드 요청 `[+]` — ✅ 구현함 (`MISSING_FILE`)
+- **위험**: 컨트롤러 파라미터를 `MultipartHttpServletRequest`로 받으면, JSON이나 본문 없는 요청에서 바인딩 예외가 나 500(`INTERNAL_ERROR`)이 될 수 있다.
+- **결정**: `HttpServletRequest`로 받아 `instanceof MultipartHttpServletRequest`가 아니면 "파일 없음"으로 보고 400 `MISSING_FILE`. 이름 없는 텍스트 필드 `file=plain`도 파일이 아니므로 `MISSING_FILE`(수동 확인).
+- _코드 세션_
+
+### A-12. 응답·details의 `fileName`은 basename `[+]` — 📝 명시
+- **결정**: 응답의 `fileName`·`details.fileName`은 경로를 뗀 이름(`C:\fakepath\a.exe` → `a.exe`). 사용자에게 의미 있는 이름이다. 로그의 `fileName`에는 **원본 그대로**를 남긴다(경로 포함 조작 시도 추적용).
+- _코드 세션_
+
+### A-13. 413이 실제로 브라우저에 도달하는가 `[+]` — 📝 T7에서 확인 필요
+- **관찰**: 로컬에서 curl로 11MB·30MB를 보내면 둘 다 413 `FILE_TOO_LARGE` JSON을 받았다(Tomcat이 응답을 먼저 쓰고 curl이 읽음). 설계가 우려한 "연결이 끊겨 413이 안 보이는" 현상은 **브라우저·Railway 프록시 경유**에서 나타날 수 있으므로 로컬 결과로 결론 내리지 않는다.
+- **판단**: 클라이언트 사전 크기 검사(§8)는 그대로 필수. 배포 후 T7에서 확인.
+- _코드 세션_
+
+### A-14. 판정용 읽기 실패와 저장 실패의 구분 `[+]` — 📝 명시
+- **결정**: 앞 2바이트 읽기(`readHead`) 실패는 Spring 임시 파일 문제라 서버 내부 오류 → 500 `INTERNAL_ERROR`(스택은 로그). 최종 저장(`Files.copy`) 실패만 500 `STORAGE_FAILED` + 부분 파일 삭제. 저장 폴더를 읽기 전용으로 바꿔 `STORAGE_FAILED`와 파일 개수 불변을 확인했다.
+- **기동 시 폴더 생성**: `FileStorage` 생성자에서 `createDirectories` — 만들 수 없으면 **앱 기동이 실패**한다(업로드가 전부 실패할 상태로 뜨는 것보다 빠르게 드러나는 쪽을 택함).
+- _코드 세션_
