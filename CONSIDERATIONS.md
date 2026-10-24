@@ -473,3 +473,9 @@
 - **결정**: 탭 복귀·변경 후 재조회가 실패하면 화면을 비우지 않고 마지막으로 받은 서버 상태를 유지한 채 상단에 `NETWORK_ERROR` 메시지 + "다시 시도" 버튼을 띄운다. 최초 로딩 실패 시에만 목록 없이 메시지만 표시.
 - **근거**: 일시적 네트워크 오류로 관리 화면이 통째로 사라지면 사용자가 상태를 잃는다. 표시 중인 값이 오래됐을 수 있다는 사실은 에러 메시지로 알린다.
 - _코드 세션_
+
+### A-21. 컨테이너 실행 확인 결과와 배포 세션 인계 `[+]` — 📝 명시
+- **확인**: 512MB 메모리 제한 컨테이너에서 `-XX:MaxRAMPercentage=75` → 힙 상한 384MB. 실행 사용자 `uid=10001(app)`(non-root), `/data/uploads`는 app 소유이고 업로드 파일이 UUID 이름·app 소유로 생성. 같은 출처에서 `/`(React), `/assets/*`, `/api/**`, `/actuator/health` 동작, `/actuator/env` 404.
+- **인계 (배포 세션)**: Railway Postgres가 주는 `DATABASE_URL`은 `postgresql://user:pass@host:port/db` 형식이라 JDBC URL이 아니다. `SPRING_DATASOURCE_URL=jdbc:postgresql://${PGHOST}:${PGPORT}/${PGDATABASE}` + `SPRING_DATASOURCE_USERNAME/PASSWORD`로 각각 연결할 것.
+- **이미지 빌드는 테스트를 돌리지 않는다**(`bootJar`만). Testcontainers 테스트는 Docker 안에서 Docker가 필요해 이미지 빌드 단계와 맞지 않는다 → 테스트는 CI/로컬에서 별도 실행.
+- _코드 세션_
