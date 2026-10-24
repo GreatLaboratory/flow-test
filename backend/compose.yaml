@@ -1,0 +1,10 @@
+# 로컬 개발용. bootRun 시 spring-boot-docker-compose가 자동 기동하고 datasource를 연결한다.
+services:
+  postgres:
+    image: 'postgres:17'
+    environment:
+      - 'POSTGRES_DB=extblock'
+      - 'POSTGRES_USER=extblock'
+      - 'POSTGRES_PASSWORD=extblock'
+    ports:
+      - '5432:5432'

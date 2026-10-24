@@ -1,0 +1,30 @@
+spring:
+  application:
+    name: extblock
+  servlet:
+    multipart:
+      max-file-size: ${app.upload.max-file-size}
+      # multipart 경계·헤더 오버헤드만큼 여유. 파일 1개 정책이라 파일 크기 + 1MB
+      max-request-size: 11MB
+
+server:
+  port: ${PORT:8080}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+
+app:
+  upload:
+    max-file-size: 10MB
+    storage-dir: /data/uploads
+  policy:
+    custom-limit: 200
+  rate-limit:
+    policy-per-minute: 30
+    upload-per-minute: 10

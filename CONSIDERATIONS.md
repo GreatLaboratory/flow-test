@@ -372,3 +372,13 @@
 
 ## 부록. 이후 세션 append 영역
 > 형식: `### 제목 [+] — ✅/⛔/🔀` · 근거 · 발견 세션
+
+### A-1. 로컬 개발 환경의 Docker Compose 버전 요구 `[+]` — 📝 명시
+- **사실**: `spring-boot-docker-compose` 4.1.2는 기동 시 `docker compose version --format json` 출력을 JSON으로 파싱한다. 오래된 Docker Desktop(Compose `2.0.0-beta.4`)은 출력에 개행을 `\n` 문자열 그대로 찍어 `StreamReadException`으로 **bootRun 자체가 실패**한다.
+- **대응**: Docker CLI/Compose 업그레이드(확인: CLI 29.9.2, Compose v5.6.1). 앱 코드 변경 없음. README 실행법에 "최신 Docker Desktop 필요"를 명시할 것(마감 세션).
+- _코드 세션_
+
+### A-2. 로컬 실행 시 업로드 저장 경로 `[+]` — 🔀 환경변수로 덮어쓰기
+- **사실**: 기본값 `/data/uploads`는 macOS 로컬에서 쓰기 권한이 없다.
+- **판단**: 기본값은 운영(컨테이너) 기준으로 유지하고, 로컬은 `APP_UPLOAD_STORAGE_DIR=./uploads`로 덮어쓴다. 프로필 파일(`application-local.yml`)은 값 1개 때문에 만들지 않는다. `backend/.gitignore`에 `uploads/` 추가.
+- _코드 세션_
