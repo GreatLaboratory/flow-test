@@ -1,0 +1,48 @@
+# 배포 세션 §6 체크리스트 실행 로그 (2026-10-25, KST 11:07~11:22)
+# 대상: https://extblock.onrender.com  (Render free, singapore, srv-dbem6m7b9u1s73a6u820)
+# 코드: main 5ca03a1 (S1~S3 포함). DB: Neon Postgres 17.11 (ap-southeast-1, direct endpoint)
+# 내 공인 IP: 175.113.88.156 (curl -4 ifconfig.me; -6도 같은 IPv4 → 이 회선은 IPv6 없음)
+
+## 기동 로그 (render logs)
+Tomcat initialized with port 10000 (http)          # PORT 주입 확인
+Successfully applied 2 migrations to schema         # Flyway V1·V2
+Started ExtblockApplication in 81.396 seconds       # 0.1 CPU
+[gc,init] CPUs: 8 total, 1 available
+[gc,init] Memory: 512M
+[gc,init] Heap Max Capacity: 384M                   # MaxRAMPercentage=75 → 보안 세션 -Xmx384m과 동일
+
+## A-17 수정 전 (forward-headers-strategy=native, XFF 기준)
+$ POST /api/extensions/custom  (XFF 없음)                   -> 201, audit client_ip=104.22.66.249
+$ POST ... -H 'X-Forwarded-For: 9.9.9.9'                    -> 201, audit client_ip=104.22.66.50
+$ POST ... -H 'X-Forwarded-For: 9.9.9.9, 10.0.0.1'          -> 201, audit client_ip=104.22.66.249
+  => 위조는 무력, 그러나 기록되는 값이 Cloudflare 엣지 IP(내 IP 아님)
+$ 같은 IP에서 업로드 14회 (한도 10/분)
+  201 201 201 201 201 201 201 201 201 201 201 201 201 201    # 429 0회 → 버킷이 CF IP별로 분산
+
+## 수정: Render 환경변수 SERVER_TOMCAT_REMOTEIP_REMOTE_IP_HEADER=CF-Connecting-IP → 재배포 dep-dbemcugae00c73dkclgg
+
+## A-17 수정 후
+$ POST (헤더 없음) name=plain1                               -> 201, audit client_ip=175.113.88.156
+$ POST -H 'X-Forwarded-For: 9.9.9.9' name=xffspoof1          -> 201, audit client_ip=175.113.88.156
+$ POST -H 'CF-Connecting-IP: 9.9.9.9' name=cfspoof1          -> 403 text/plain "error code: 1000" (server: cloudflare, 엣지에서 거부 — origin 미도달)
+$ POST -H 'XFF: 9.9.9.9, 10.0.0.1' -H 'CF-Connecting-IP: 10.0.0.1' -> 403 (같음)
+
+## 프록시 뒤 rate limit (수정 후)
+$ 업로드 11회:   201 x10, 429 {"code":"RATE_LIMITED",...}
+$ PUT /api/extensions/fixed/1 31회 (직전 POST 2회가 같은 버킷 소비): 200 x28, 429 x3   # 30회/분 정확
+
+## A-13 / §7-18
+$ curl -F file=@12MB /api/uploads  -> 413 {"code":"FILE_TOO_LARGE",...} sent=12000202 t=1.18s
+$ 브라우저 fetch 12MB FormData (클라이언트 검사 우회) -> 413 application/json FILE_TOO_LARGE   (a13-browser-413-json.jpg)
+
+## S1 재공격 (수정 반영본)
+$ head -c 300000000 /dev/zero | tr '\0' a | curl -X PUT -H 'Content-Type: application/x-www-form-urlencoded' --data-binary @- $URL/nope
+  HTTP 404 sent=300000000 t=6.22s         # 프록시가 본문 크기를 제한하지 않음(300MB 전부 수신) → 앱 상한이 유일한 방어선
+$ POST /api/extensions/custom JSON name 100MB -> HTTP 400 INVALID_REQUEST t=2.49s
+$ 로그: OutOfMemoryError 0건, level ERROR 0건, /actuator/health UP
+
+## IPv6
+$ dig +short AAAA extblock.onrender.com   -> CNAME만, AAAA 레코드 없음 → IPv4 전용 수신, /64 회전 우회 해당 없음
+
+## 디스크
+`render ssh` 시도 → "Host key verification failed" (무료 인스턴스는 셸 미지원) → df 불가. 공식 문서도 무료 인스턴스 디스크 크기 미기재 → "미확인"으로 기록.

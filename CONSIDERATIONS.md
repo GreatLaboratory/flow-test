@@ -434,6 +434,7 @@
 - **관찰**: 로컬에서 curl로 11MB·30MB를 보내면 둘 다 413 `FILE_TOO_LARGE` JSON을 받았다(Tomcat이 응답을 먼저 쓰고 curl이 읽음). 설계가 우려한 "연결이 끊겨 413이 안 보이는" 현상은 **브라우저·Railway 프록시 경유**에서 나타날 수 있으므로 로컬 결과로 결론 내리지 않는다.
 - **판단**: 클라이언트 사전 크기 검사(§8)는 그대로 필수. 배포 후 T7에서 확인.
 - _코드 세션_
+- **배포 세션 확인 ✅**: Render(Cloudflare 경유)에서 curl 12MB → 413 JSON, 브라우저 `fetch` 12MB(클라이언트 검사 우회) → 413 `application/json` `FILE_TOO_LARGE`. 프록시가 연결을 끊지 않는다 (`docs/verification/deploy/a13-browser-413-json.jpg`).
 
 ### A-14. 판정용 읽기 실패와 저장 실패의 구분 `[+]` — 📝 명시
 - **결정**: 앞 2바이트 읽기(`readHead`) 실패는 Spring 임시 파일 문제라 서버 내부 오류 → 500 `INTERNAL_ERROR`(스택은 로그). 최종 저장(`Files.copy`) 실패만 500 `STORAGE_FAILED` + 부분 파일 삭제. 저장 폴더를 읽기 전용으로 바꿔 `STORAGE_FAILED`와 파일 개수 불변을 확인했다.
@@ -459,6 +460,7 @@
 - **확인 방법**: 배포 후 감사 행의 `client_ip`가 내 공인 IP인지, 서로 다른 네트워크에서 키가 분리되는지 확인. 필요 시 `server.tomcat.remoteip.internal-proxies`만 조정.
 - **부수 확인**: 한도를 넘은 IP의 30MB 업로드는 본문을 받기 전에 0.001초 만에 429 — 필터가 multipart 파싱 전에 판단함을 확인.
 - _코드 세션_
+- **배포 세션 결과**: 위험 1번이 다른 모양으로 실현됨 — 기록된 값이 Cloudflare 엣지 IP였다. 위조(2번)는 막혔다. → A-38에서 교정.
 
 ### A-18. 클라이언트는 정규화한 값이 아니라 입력값 그대로 전송 `[+]` — ✅ 구현함
 - **결정**: `normalize.ts`는 사전 검사(형식·목록 중복)에만 쓰고, `POST`에는 사용자가 입력한 원문을 보낸다. 정규화의 기준은 서버 하나.
@@ -564,3 +566,25 @@
 - **multipart**: `DispatcherServlet`은 핸들러를 찾기 전에 multipart를 파싱한다(`POST /nope` + 12MB → 413). rate limit 밖에서 요청당 최대 11MB 임시 파일이 생기지만 요청 종료 시 삭제되고 상한이 있다 → 수용. A-30의 본문 래퍼는 Tomcat `getParts()`가 내부 스트림을 읽어 이것을 막지 못한다. 후보 `spring.servlet.multipart.resolve-lazily=true`는 미검증.
 - **교차 출처**: JSON API는 preflight에서 막힌다(ACAO 없음, `text/plain`은 400). 업로드(`multipart/form-data`)는 simple request라 다른 사이트가 방문자 브라우저로 보낼 수 있다. 무인증이라 공격자의 직접 호출과 권한이 같고, 남는 것은 방문자 IP로 rate limit을 분산하는 효과뿐 → 5-4 판단에 포함, 수용.
 - _보안 세션_
+
+### A-37. 배포처 변경: Railway → Render 무료 + Neon 무료 `[+]` — 🔀 다르게 처리함 (배포 세션, 사람 결정)
+- **발생**: Railway는 2026-10-21 보안 사고(공격자가 고객 환경변수 접근, 10-22 차단) 이후 신규 가입이 막혔다(GitHub·Google·이메일 모두 "Sign ups are currently disabled"). 사람은 무료(Trial)를 골랐지만 계정을 만들 수 없었다.
+- **비교 (공식 문서, 2026-10)**: Render 무료 웹 = 512MB / 0.1 CPU, 15분 무요청 시 슬립(깨우는 데 약 1분), 월 750시간, 디스크 휘발성. Render 무료 Postgres = **30일 만료** → DB만 Neon 무료(1GB, 월 100 CU-시간, 5분 유휴 시 정지, 만료 없음). Koyeb 무료(512MB/0.1 vCPU, 1시간 무트래픽 시 0)는 Render보다 나은 점이 없어 기각.
+- **대가**: 슬립 후 첫 접속은 Render 깨움 + 앱 기동 81초(0.1 CPU 실측) → 1~2분. 면접 직전에 한 번 접속해 깨운다(README). 외부 keep-alive 핑은 **하지 않음** — 24시간 깨어 있으면 앱의 커넥션 풀 때문에 Neon도 깨어 있을 수 있고(유휴 커넥션이 정지를 막는지는 Neon 문서에 없음), 0.25 CU × 744시간 = 186 CU-시간 > 무료 100.
+- **유지된 설계 전제**: 단일 컨테이너·같은 출처, 휘발성 디스크(3-3), 메모리 512MB → 힙 384MB(보안 세션 `-Xmx384m`과 같은 조건, `-Xlog:gc+init`로 확인), Postgres 17(LOCK TABLE).
+- **Neon 연결**: pooler(PgBouncer)가 아닌 **direct endpoint** — Flyway와 `LOCK TABLE` 트랜잭션을 풀러 없이. 연결 문자열을 `SPRING_DATASOURCE_URL`(JDBC, `sslmode=require`)·`USERNAME`·`PASSWORD`로 분해(A-21과 같은 이유). `channel_binding=require`는 JDBC 드라이버가 자동 협상하므로 뺐다.
+- _배포 세션_
+
+### A-38. 배포 환경의 클라이언트 IP = Cloudflare 엣지 IP → rate limit·감사 무력 `[+]` — ✅ 구현함 (배포 세션, Medium)
+- **실측 (수정 전)**: 감사 `client_ip`가 내 공인 IP가 아니라 `104.22.66.x`(Cloudflare). 같은 IP에서 업로드 14회 → **14회 모두 201**(한도 10/분). 경로: Cloudflare → Render LB(사설 IP = 신뢰 대역) → 컨테이너. Cloudflare가 XFF에 **덧붙이기만** 하므로 XFF = `[클라이언트가 보낸 값…, 실제 IP, CF IP]`. `RemoteIpValve`는 오른쪽부터 첫 비신뢰 값인 CF IP에서 멈춘다.
+- **영향**: ① 한 사용자의 요청이 여러 CF IP로 흩어져 per-IP 한도 우회 ② 같은 CF 엣지(한국 = NRT/KIX)를 쓰는 사용자끼리 버킷 공유 → 한 명의 남용이 다른 사람을 429로 막음 ③ 감사 IP로 추적 불가. XFF 왼쪽 위조(9.9.9.9)는 막혔다.
+- **대안 비교**: (a) Cloudflare 대역 전체를 `trusted-proxies`로 → 범위가 넓고 목록이 바뀌며, Cloudflare Workers 같은 Cloudflare 출발 요청까지 신뢰하게 됨 → 기각. (b) **`CF-Connecting-IP` 헤더 사용** — Render 문서: Cloudflare가 Render 웹 서비스로 가는 모든 요청에 쓰고 호출자가 보낸 값을 덮어쓴다. 값이 하나라 체인 해석이 없다 → 채택.
+- **수정 (사람 승인, 설정 1줄)**: Render 환경변수 `SERVER_TOMCAT_REMOTEIP_REMOTE_IP_HEADER=CF-Connecting-IP`. peer(Render LB) 신뢰 대역은 기본값 그대로이고, 읽는 헤더만 바뀐다. **yml이 아니라 배포 환경변수**로 둔 이유: 로컬·테스트엔 Cloudflare가 없다. 로컬의 XFF 동작(보안 세션 재현 방식)을 바꾸지 않는다.
+- **재검증**: 감사 `client_ip` = `175.113.88.156`(내 IP), XFF 9.9.9.9 무시. 클라이언트가 `CF-Connecting-IP: 9.9.9.9`를 보내면 Cloudflare가 엣지에서 **403 `error code: 1000`**으로 거부(origin 미도달). 업로드 11번째 429, 정책 변경 31번째 429.
+- **전제(문서화)**: 모든 요청이 Cloudflare를 거친다는 Render의 구조에 기댄다. Render 내부 private network로 들어오는 요청에는 이 헤더가 없어 LB/peer IP로 묶이지만, 이 앱은 public 서비스 하나뿐이다. 플랫폼을 바꾸면 이 항목을 다시 확인할 것.
+- _배포 세션_
+
+### A-39. 플랫폼 프록시는 요청 본문 크기를 제한하지 않는다 `[+]` — 📝 명시 (배포 세션)
+- **실측**: `PUT /nope` urlencoded **300MB가 전부 전송**된 뒤 앱이 404(6.2초). Cloudflare·Render 모두 본문 크기에서 끊지 않았다(Render 문서에도 본문 상한 없음, "업로드 5분 내 완료"만).
+- **의미**: SECURITY_REVIEW S1의 앱 상한(업로드 외 16KB, 업로드 11MB)이 **유일한 방어선**이다. "배포 프록시가 막아줄 수도"라는 완화 가능성은 없다. 재공격 결과 OOM 0, ERROR 0, health UP.
+- _배포 세션_

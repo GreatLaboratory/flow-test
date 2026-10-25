@@ -175,12 +175,12 @@ docker exec -i backend-postgres-1 psql -U extblock -d extblock < db/reset.sql
 - [ ] A-16: rate limit 경로 우회 변형 추가 탐색(대소문자, 인코딩된 `/` 등).
 - [ ] A-17: XFF 위조 시나리오를 배포 환경에서 재확인.
 
-### 배포 세션
-- [ ] **A-17 (필수)**: Railway 프록시가 `RemoteIpValve` 신뢰 대역에 드는지. 배포 후 커스텀 1개 추가 → `policy_audit.client_ip`가 **내 공인 IP**인지 확인. 프록시 IP가 찍히면 전 사용자가 rate limit 버킷 하나를 공유한다 → `server.tomcat.remoteip.internal-proxies`만 조정(너무 넓히면 위조 허용).
-- [ ] **A-21 (필수)**: `DATABASE_URL`은 JDBC 형식 아님. `SPRING_DATASOURCE_URL=jdbc:postgresql://${PGHOST}:${PGPORT}/${PGDATABASE}`, `SPRING_DATASOURCE_USERNAME/PASSWORD` 각각 연결.
-- [ ] `PORT` 주입 확인(`server.port: ${PORT:8080}`), 컨테이너 메모리 한도 확인(힙 = 75%).
-- [ ] `/data/uploads`는 휘발성(의도). 볼륨을 붙이지 말 것 — 붙이면 디스크 고갈이 재배포로 초기화되지 않는다(CONSIDERATIONS 3-3, 5-4).
-- [ ] 면접 전날 `/actuator/health`, 필요 시 `db/reset.sql`.
+### 배포 세션 — ✅ 완료 (Render + Neon, 결과는 SECURITY_REVIEW §6)
+- [x] **A-17**: 기본값으로는 Cloudflare 엣지 IP가 기록됨 → `SERVER_TOMCAT_REMOTEIP_REMOTE_IP_HEADER=CF-Connecting-IP`(배포 환경변수)로 교정, 내 공인 IP 기록·위조 거부·429 재검증 (A-38).
+- [x] **A-21**: Neon 연결 문자열을 `SPRING_DATASOURCE_URL`(JDBC)·`USERNAME`·`PASSWORD`로 분해 (A-37).
+- [x] `PORT`=10000 주입 확인, 컨테이너 512MB → 힙 384MB.
+- [x] `/data/uploads` 볼륨 없음(Render 무료는 볼륨 불가 — 의도와 일치).
+- [ ] 면접 전날 `/actuator/health`, 필요 시 `db/reset.sql` → README 배포 섹션.
 
 ### 마감 세션
 - [ ] README 실행법에 §1 내용 + "최신 Docker Desktop 필요"(A-1) + 로컬 `APP_UPLOAD_STORAGE_DIR=./uploads`(A-2).
