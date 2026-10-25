@@ -117,5 +117,6 @@ document.dispatchEvent(new Event('visibilitychange'));   // 이후 0.3초 안에
 E2E 후 로컬 DB는 매번 `db/reset.sql`로 초기화.
 
 ## 7. 다음 세션에 남기는 것
+> **(마감 세션 주)** 배포·보안 항목의 결과: 413 브라우저 도달(A-13·§7-18)과 프록시 뒤 rate limit은 `docs/SECURITY_REVIEW.md` §6, 배포 URL 핵심 플로우는 `docs/verification/deploy/deploy_core_flow.gif`. 배포 URL에서 E1~E6 전체 재실행 기록은 없다.
 - **배포**: 배포 URL에서 E1~E6 재실행 + 10MB 초과 업로드 시 브라우저에 413이 보이는지, NETWORK_ERROR로 보이는지(A-13, §7-18). §7-17은 수정됨 — 배포 지연에서 E1을 돌릴 때 함께 관찰.
 - **보안**: rate limit(§7-13~15), XFF 위조, actuator — 테스트에서는 rate limit 한도를 올려 두었으므로 보안 세션이 별도로 검증.

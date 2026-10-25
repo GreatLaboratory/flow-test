@@ -174,6 +174,7 @@ private static HttpServletRequest limitBody(HttpServletRequest request) {
 - 판단 근거: Spring 경로 매칭은 대소문자를 구분하고 끝 슬래시를 매칭하지 않으며, Tomcat은 인코딩된 `/`·`\`를 거부한다. 컨트롤러에 닿는 변형은 모두 `getServletPath()`가 `/api/uploads`로 정규화한다.
 
 ### A-17 XFF 위조 / trust proxy — 로컬 ✅, 배포 **미검증**
+> **(마감 세션 주)** 배포 동작은 §6에서 검증됨 — Cloudflare 엣지 IP가 기록되는 결함(S6 = CONSIDERATIONS A-38) 발견 후 교정. 아래 "Railway 프록시"는 배포처 변경(A-37) 전 문장.
 - 로컬(127.0.0.1 = 신뢰 프록시) 실측, 감사 `client_ip`:
   `XFF: 6.6.6.6, 1.1.1.1` → `1.1.1.1` · `1.1.1.1, 10.0.0.5` → `1.1.1.1`(오른쪽 사설 IP 건너뜀) · `1.1.1.1, 2.2.2.2` → `2.2.2.2` · `evil-not-an-ip` → **`evil-not-an-ip`**
 - 해석: 오른쪽부터 첫 번째 비신뢰 값을 쓰므로 **왼쪽 위조는 무력**하다. 대신 신뢰 프록시가 넘긴 값이면 IP 형식이 아니어도 그대로 믿는다. 즉 안전성은 전적으로 "Railway 프록시가 클라이언트 XFF 뒤에 실제 IP를 붙이는가"에 달려 있다 → §6.
