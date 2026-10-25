@@ -3,6 +3,7 @@ package com.example.extblock.upload;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.IOException;
+import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -25,6 +26,18 @@ class UploadApiTest extends IntegrationTestBase {
 
 	static String code(HttpResponse<String> res) {
 		return JsonPath.read(res.body(), "$.code");
+	}
+
+	/** 헬퍼가 만들 수 없는 multipart(filename*, 깨진 경계 등)를 그대로 보낸다 */
+	HttpResponse<String> raw(String contentType, String body) {
+		return send(HttpRequest.newBuilder(uri("/api/uploads"))
+				.header("Content-Type", contentType)
+				.POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
+				.build());
+	}
+
+	static String filePart(String disposition) {
+		return "--B\r\nContent-Disposition: form-data; name=\"file\"; " + disposition + "\r\n\r\nhello\r\n--B--\r\n";
 	}
 
 	@Test // U1 기본 unCheck → exe도 성공
@@ -209,6 +222,42 @@ class UploadApiTest extends IntegrationTestBase {
 		String message = JsonPath.read(res.body(), "$.message");
 		assertThat(message).contains("." + matched.get(0));
 		assertThat(res.body() + res.headers().map()).doesNotContain("x-weird-type");
+	}
+
+	// U19 (S3) filename*은 Tomcat이 디코딩하지 않아 Tomcat의 NUL 검사를 지나 Spring까지 온다 → 판정이 막아야 함
+	@Test
+	void controlCharsViaFilenameStarRejected() throws IOException {
+		setFixed("exe", true);
+		for (String enc : new String[] { "a.exe%00", "a.exe%7F", "a.exe%01" }) {
+			HttpResponse<String> res = raw("multipart/form-data; boundary=B", filePart("filename*=UTF-8''" + enc));
+			assertThat(res.statusCode()).as(enc).isEqualTo(400);
+			assertThat(code(res)).as(enc).isEqualTo("INVALID_FILENAME_CHAR");
+			assertThat((String) JsonPath.read(res.body(), "$.message")).contains("허용되지 않는 문자");
+		}
+		assertThat(storedFiles()).isEmpty();
+	}
+
+	// U20 (S2) 깨진 multipart는 클라이언트 오류 400 (이전: 500 + ERROR 스택 로그)
+	@Test
+	void malformedMultipartIs400() {
+		String[][] cases = {
+				{ "multipart/form-data; boundary=B", "--B\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.txt\"\r\n\r\nabc" }, // 끝 경계 없음
+				{ "multipart/form-data", "x" }, // boundary 없음
+				{ "multipart/form-data; boundary=B", filePart("filename=\"a.exe\u0000.jpg\"") }, // Tomcat InvalidFileNameException
+		};
+		for (String[] c : cases) {
+			HttpResponse<String> res = raw(c[0], c[1]);
+			assertThat(res.statusCode()).as(c[1]).isEqualTo(400);
+			assertThat(code(res)).as(c[1]).isEqualTo("INVALID_REQUEST");
+		}
+	}
+
+	@Test // U21 대소문자 접기: 실제 파서(UTF-8 파일명)에서 a.ſcr 차단, 정상 한글·다중 점 파일명 통과
+	void caseFoldHomoglyphViaRealParser() {
+		setFixed("scr", true);
+		assertThat(upload("a.\u017Fcr", TEXT).statusCode()).isEqualTo(422);
+		assertThat(upload("홍길동 이력서.v2.pdf", TEXT).statusCode()).isEqualTo(201);
+		assertThat(upload("report.pdf", TEXT).statusCode()).isEqualTo(201);
 	}
 
 }

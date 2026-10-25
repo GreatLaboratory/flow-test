@@ -167,7 +167,7 @@ COMMIT;
 | `PUT /api/extensions/fixed/{id}` | `{ "blocked": true }` | 200 `{id,name,blocked}` | 404 `EXTENSION_NOT_FOUND`(없음 또는 커스텀 id), 400 `INVALID_REQUEST` |
 | `POST /api/extensions/custom` | `{ "name": ".SH " }` | 201 `{id,name:"sh",createdAt}` (정규화된 값) | 400 `INVALID_EXTENSION`, 409 `FIXED_EXTENSION_CONFLICT` / `DUPLICATE_EXTENSION` / `CUSTOM_LIMIT_EXCEEDED` |
 | `DELETE /api/extensions/custom/{id}` | — | **항상 204** (멱등) | — |
-| `POST /api/uploads` | multipart, 파트 `file` 정확히 1개 | 201 `{key,fileName,size}` | 400 `MISSING_FILE` / `TOO_MANY_FILES` / `INVALID_FILENAME`, 413 `FILE_TOO_LARGE`, 422 `BLOCKED_EXTENSION` / `BLOCKED_CONTENT`, 500 `STORAGE_FAILED` |
+| `POST /api/uploads` | multipart, 파트 `file` 정확히 1개 | 201 `{key,fileName,size}` | 400 `MISSING_FILE` / `TOO_MANY_FILES` / `INVALID_FILENAME` / `INVALID_FILENAME_CHAR`, 413 `FILE_TOO_LARGE`, 422 `BLOCKED_EXTENSION` / `BLOCKED_CONTENT`, 500 `STORAGE_FAILED` |
 | `GET /actuator/health` | — | 200 | 503 |
 | 공통 (rate limit) | — | — | 429 `RATE_LIMITED` |
 
@@ -184,6 +184,7 @@ COMMIT;
 | `MISSING_FILE` | 400 | 업로드할 파일이 없습니다. |
 | `TOO_MANY_FILES` | 400 | 한 번에 하나의 파일만 업로드할 수 있습니다. |
 | `INVALID_FILENAME` | 400 | 파일명이 없거나 255자를 초과합니다. |
+| `INVALID_FILENAME_CHAR` | 400 | 파일명에 허용되지 않는 문자(제어문자)가 포함되어 있습니다. |
 | `FILE_TOO_LARGE` | 413 | 파일 크기는 최대 {max}까지 가능합니다. |
 | `BLOCKED_EXTENSION` | 422 | '.{ext}' 확장자는 업로드가 차단되어 있습니다. |
 | `BLOCKED_CONTENT` | 422 | 파일 내용이 실행 파일(PE) 형식이라 차단되었습니다. |
@@ -208,9 +209,10 @@ COMMIT;
 1. fileName == null/빈 값                       → INVALID_FILENAME  (컨트롤러에서 MISSING_FILE과 구분)
 2. base = 마지막 '/' 또는 '\' 뒤                  (경로 포함 파일명 대응)
 3. base 길이 == 0 또는 > 255                     → INVALID_FILENAME
+3a. base에 제어문자(U+0000~001F, U+007F)           → INVALID_FILENAME_CHAR  (`a.exe\0` `a.exe<DEL>` `a.exe\t`)
 4. trimmed = base 끝의 '.'·' ' 반복 제거          (Windows가 file.exe. → file.exe로 저장)
 4a. trimmed 길이 == 0                             → INVALID_FILENAME  (`..` `...` `. .` `"   "` = 파일명 없음과 같다)
-5. segments = trimmed.split('.') 에서 첫 구간 제외, 각 구간 소문자화, 빈 구간 제외
+5. segments = trimmed.split('.') 에서 첫 구간 제외, 각 구간 대소문자 접기(toUpperCase→toLowerCase, ROOT), 빈 구간 제외
       a.exe.txt → {exe, txt} · .env → {env} · Makefile → {} · exe.txt → {txt}
 6. matched = segments ∩ blocked                  비어있지 않으면 → BLOCKED_EXTENSION (우선)
 7. head 앞 2바이트 == 'M','Z' 이고 {exe,com,scr,cpl} ∩ blocked ≠ ∅
@@ -223,6 +225,8 @@ COMMIT;
 - 확장자와 내용이 모두 해당하면 **`BLOCKED_EXTENSION` 우선** — 사용자가 이해하기 쉬운 사유.
 - 0바이트 파일은 통과(차단 사유 없음).
 - **4a단계 추가 (테스트 세션, 2026-10-24)**: 독립 테스트가 스펙 순서 결함을 발견했다. 원래 순서는 빈 값 검사(3단계)가 끝 정리(4단계)보다 **앞에만** 있어서, 정리 후 빈 이름이 되는 `...` 같은 파일명이 통과·저장됐다(구현은 스펙을 그대로 따랐음). 사람이 "파일명 없음과 같다"로 판정 → 4a 추가. 근거: `docs/VERIFICATION.md` B1, `CONSIDERATIONS.md` A-24.
+- **3a단계 추가 (보안 세션, 2026-10-25)**: `filename*=UTF-8''a.exe%00` → 201 `"a.exe\u0000"`, `%7F`(DEL) → 화면에 `'a.exe' 업로드 성공`. `filename*`은 Tomcat이 디코딩하지 않아 Tomcat의 NUL 검사도 지나간다. 정상 파일명엔 제어문자가 없어(Windows는 금지) 오탐 비용 0 → 거부. 끝 정리(4단계) **앞**에 둬서 `file.exe.\n` 같은 조합도 정리 전에 걸린다. 사유가 "없음/길이"와 달라 code를 분리했다. 근거: `docs/SECURITY_REVIEW.md` S3, `CONSIDERATIONS.md` A-32.
+- **5단계 접기 변경 (보안 세션, 2026-10-25)**: 소문자화만 하면 `ſ`(U+017F)·`ı`(U+0131)가 남는다. 대문자로 바꾸면 ASCII `S`·`I`가 되므로, Windows가 확장자를 대소문자 무시로 비교할 때 `a.ſcr`가 `.scr`로 취급될 가능성(미검증)을 1줄로 닫는다. ASCII에서는 기존 소문자화와 결과가 같아 정상 판정이 바뀌지 않는다(J30·J31). 근거: `CONSIDERATIONS.md` A-33.
 
 ### 6-2. 커스텀 입력 정규화 — `ExtensionNormalizer.normalize(raw)`
 
@@ -388,6 +392,9 @@ public class ApiException extends RuntimeException {
 
 - **RateLimitFilter는 에러 응답을 직접 쓴다**: 서블릿 필터는 `@RestControllerAdvice` 밖에서 실행된다. 429 응답 본문(§5-1 형식, `RATE_LIMITED`)과 `Content-Type: application/json`을 필터가 직접 작성한다.
 - **RateLimitFilter는 `request.getParameter*()`·`getParts()`를 호출하지 않는다**: 호출하면 multipart 본문 파싱이 시작돼, 한도를 넘은 요청도 10MB를 끝까지 받게 된다. 판단은 메서드·URI·`getRemoteAddr()`만으로 한다.
+- **[정정 — 보안 세션] 이 필터보다 먼저 본문을 읽는 필터가 있으면 위 규칙은 무의미하다**: Spring Boot 기본 `FormContentFilter`(order −9900)는 `PUT|PATCH|DELETE` + urlencoded 본문을 **이 필터보다 먼저, 경로와 무관하게** 통째로 메모리에 읽었다(인증 없는 요청 1개로 `OutOfMemoryError` 재현). 이 앱엔 form 엔드포인트가 없으므로 `spring.mvc.formcontent.filter.enabled=false`로 끈다. OOM 스택에서 확인한 순서는 CharacterEncodingFilter → ServerHttpObservationFilter → FormContentFilter → … → RateLimitFilter였고, 남은 앞쪽 필터들은 본문을 읽지 않는다. multipart 파싱과 Jackson은 그 뒤 DispatcherServlet에서 일어난다.
+- **업로드 외 요청 본문 상한 16KB**: multipart 한도는 업로드에만 있어 JSON 본문은 무제한이었다(`name` 100MB → OOM). RateLimitFilter가 업로드 외 요청을 `ContentCachingRequestWrapper(request, 16KB)`로 감싸 `handleContentOverflow`에서 400 `INVALID_REQUEST`를 던진다. Content-Length가 아니라 **실제로 읽은 양** 기준이라 chunked도 막힌다. 가장 큰 정상 본문은 `{"name":"<20자>"}`. 근거: `docs/SECURITY_REVIEW.md` S1, `CONSIDERATIONS.md` A-30.
+- **깨진 multipart는 400**: `MultipartException`(크기 초과 제외)은 클라이언트 오류 → `INVALID_REQUEST`. 이전엔 500 + 요청당 약 6KB ERROR 스택 로그(S2, A-31).
 - **적용 대상**: `PUT|POST|DELETE /api/extensions/**` → policy 버킷, `POST /api/uploads` → upload 버킷. 키는 `"policy:" + ip` / `"upload:" + ip`. GET·정적 파일·actuator는 제한하지 않는다.
 - **버킷 설정**: 용량 n, `refillIntervally(n, 1분)` (1분마다 n개 충전 — 고정 창과 유사해 설명이 쉽다). Caffeine: `expireAfterAccess(10분)`, `maximumSize(100_000)`.
 - **MZ 읽기와 저장**: `MultipartFile.getInputStream()`은 호출할 때마다 새 스트림을 연다. 앞 2바이트는 첫 스트림에서 `readNBytes(2)`로 읽어 닫고, 저장은 새 스트림으로 `FileStorage.save()`에 넘긴다.
