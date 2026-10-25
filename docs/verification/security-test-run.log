@@ -1,0 +1,72 @@
+# 보안 세션 검증 로그 (2026-10-25 KST) — SECURITY_REVIEW §9
+
+## 1. RED: 운영 코드 수정 전(ErrorCode 1줄만 추가해 컴파일) + 새 테스트
+RequestBodyLimitTest > chunkedBodyOverLimitRejected() FAILED
+RequestBodyLimitTest > formContentFilterDisabled() FAILED
+RequestBodyLimitTest > putOverLimitRejected() FAILED
+RequestBodyLimitTest > bodyOverLimitRejected() FAILED
+ExtensionJudgeTest > controlCharsRejected(String) > [1] name = "a.exe�" FAILED
+ExtensionJudgeTest > controlCharsRejected(String) > [2] name = "a.exe�.jpg" FAILED
+ExtensionJudgeTest > controlCharsRejected(String) > [3] name = "a.exe�" FAILED
+ExtensionJudgeTest > controlCharsRejected(String) > [4] name = "a.exe�" FAILED
+ExtensionJudgeTest > controlCharsRejected(String) > [5] name = "a\rb.txt" FAILED
+ExtensionJudgeTest > controlCharsRejected(String) > [6] name = "�report.pdf" FAILED
+ExtensionJudgeTest > controlCharTail() FAILED
+ExtensionJudgeTest > caseFoldHomoglyphsBlocked(String) > [1] name = "a.ſcr" FAILED
+ExtensionJudgeTest > caseFoldHomoglyphsBlocked(String) > [2] name = "a.jſ" FAILED
+ExtensionJudgeTest > caseFoldHomoglyphsBlocked(String) > [3] name = "a.ſCR" FAILED
+ExtensionJudgeTest > caseFoldHomoglyphsBlocked(String) > [4] name = "setup.msı" FAILED
+UploadApiTest > malformedMultipartIs400() FAILED
+UploadApiTest > controlCharsViaFilenameStarRejected() FAILED
+UploadApiTest > caseFoldHomoglyphViaRealParser() FAILED
+> Task :test FAILED
+166 tests completed, 18 failed
+BUILD FAILED in 18s
+
+## 2. GREEN: 수정 후 ./gradlew clean test
+BUILD SUCCESSFUL in 19s
+common.RequestBodyLimitTest" tests="6" skipped="0" failures="0" errors="0"
+ConfiguredLimitsTest" tests="5" skipped="0" failures="0" errors="0"
+policy.ConcurrencyTest" tests="7" skipped="0" failures="0" errors="0"
+policy.ExtensionNormalizerTest" tests="25" skipped="0" failures="0" errors="0"
+policy.PolicyApiTest" tests="27" skipped="0" failures="0" errors="0"
+upload.ExtensionJudgeTest" tests="77" skipped="0" failures="0" errors="0"
+upload.UploadApiTest" tests="19" skipped="0" failures="0" errors="0"
+합계: 166개, 실패 0 (보안 세션 이전 136개 + 신규 30개). RED에서 통과한 신규 테스트(R2·R6·J30·J31)는 경계 정상값·오탐 방지용이라 수정 전에도 통과하는 것이 맞다.
+
+## 3. 프론트: npm test / npm run build
+
+ Test Files  1 passed (1)
+      Tests  26 passed (26)
+   Start at  09:54:52
+   Duration  91ms (import 40%, tests 23%, transform 21%, worker 15%)
+
+dist/assets/index-BcTtrRia.js   224.53 kB │ gzip: 70.70 kB
+
+✓ built in 94ms
+
+## 4. 수정된 bootJar (JDK 21, -Xmx384m)에 실제 공격 재발사
+### A. 기본 설정 (Tomcat max-swallow-size 2MB) — client-sent는 소켓 버퍼 + Tomcat swallow 포함
+-- urlencoded PUT 300MB /api/extensions/fixed/1
+{"code":"INVALID_REQUEST","message":"요청 형식이 올바르지 않습니다."} [400 0.015730s client-sent=686520]
+-- urlencoded PUT 300MB /nope
+{"code":"NOT_FOUND","message":"요청한 경로를 찾을 수 없습니다."} [404 0.005659s client-sent=743928]
+-- JSON name 100MB (chunked)
+{"code":"INVALID_REQUEST","message":"요청 형식이 올바르지 않습니다."} [400 0.010004s client-sent=1021752]
+-- 4 concurrent JSON 100MB
+  [400 client-sent=1235984]
+  [400 client-sent=917504]
+  [400 client-sent=849848]
+  [400 client-sent=1559992]
+A 요약: OutOfMemoryError=0, ERROR 로그=0, 공격 후 health UP
+### C. 송신 속도 제한 (응답 시점까지 보낸 양 ≈ 앱이 읽은 양 + curl 버스트 1개)
+-- urlencoded 300MB @64KB/s → {"code":"INVALID_REQUEST"} [400 1.006s client-sent=65536]
+-- JSON 100MB @64KB/s      → {"code":"INVALID_REQUEST"} [400 1.004s client-sent=65536]
+-- JSON 200KB @16KB/s      → {"code":"INVALID_REQUEST"} [400 2.006s client-sent=49152]
+-- 대조 JSON 15KB 정상      → 201 [client-sent=15013]
+해석: curl --limit-rate는 버퍼 단위로 보내므로 첫 버스트(64KB/16KB)가 최소 단위다. JSON은 앱이 16KB + Jackson 읽기 버퍼만큼 읽고 400, urlencoded는 FormContentFilter가 없어 앱이 본문을 읽지 않고 400(415 계열). 시제품에서 본 client-sent 785KB는 앱이 읽은 양이 아니라 Tomcat swallow(최대 2MB) + 소켓 버퍼다.
+C 요약: OutOfMemoryError=0, ERROR 로그=0
+
+## 5. 수정 전 jar 기준선 (같은 공격)
+-- PUT /nope urlencoded 300MB → 136MB 수신 시점 java.lang.OutOfMemoryError: Java heap space (FormContentFilter.parseIfNecessary → FormHttpMessageConverter.read → StreamUtils.copyToString)
+-- POST /api/extensions/custom JSON name 100MB → 500, ServletException: Handler dispatch failed: java.lang.OutOfMemoryError: Java heap space
