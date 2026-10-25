@@ -113,22 +113,23 @@ docker exec -i backend-postgres-1 psql -U extblock -d extblock < db/reset.sql
 | 8 | non-root(uid 10001), 힙 384MB/512MB, 같은 출처 UI+API, 업로드 저장 | docker run |
 
 **확인하지 못한 것**: 배포 환경(Railway 프록시)에서의 413 도달(A-13)과 클라이언트 IP 교정(A-17). 로컬에서는 재현 불가.
+> **(마감 세션 주)** 둘 다 배포 세션(Render)에서 확인됨: 413은 JSON으로 도달(A-13), client IP는 결함 발견 후 교정(A-38). SECURITY_REVIEW §6.
 
 ## 6. 알려진 한계
 
 | 한계 | 영향 | 비고 |
 |---|---|---|
-| `max-request-size` 11MB 고정 | 파일 한도를 올리면 메시지·프론트 안내와 실제 한도가 어긋남. 1MB 미만 한도는 "0MB" 표시 | A-22. 기본 10MB에선 무관 |
+| `max-request-size` 11MB 고정 | 파일 한도를 올리면 메시지·프론트 안내와 실제 한도가 어긋남. 1MB 미만 한도는 "0MB" 표시 | A-22. 기본 10MB에선 무관. **테스트 세션에서 해소**(요청 한도 = 파일 한도 + 1MB, A-27). "0MB" 표시는 남음 |
 | rate limit은 인스턴스 메모리 | 재시작 시 초기화, 다중 서버에서 무력 | Redis ProxyManager로 교체 (§4) |
 | rate limit은 고정 창과 비슷한 충전 방식 | 창 경계에서 최대 2n회 연속 허용(예: 59초에 30회 + 61초에 30회) | 설명 쉬움을 택한 결과(설계 §7-3) |
 | rate limit은 실패한 요청(400·409)도 1회로 셈 | 잘못된 입력을 반복하면 정상 요청도 막힘 | 남용 방지 목적상 의도 |
-| 신뢰 프록시 설정 미검증 | 배포 환경에 따라 전 사용자 버킷 공유 또는 XFF 위조 허용 | A-17, 배포 세션 필수 |
-| 413이 브라우저에 보이는지 미확인 | 프록시가 연결을 끊으면 `NETWORK_ERROR`로 보일 수 있음 | A-13. 클라이언트 사전 검사로 정상 경로에선 요청 자체가 안 나감 |
+| 신뢰 프록시 설정 미검증 | 배포 환경에 따라 전 사용자 버킷 공유 또는 XFF 위조 허용 | A-17, 배포 세션 필수. **배포 세션에서 해소**(A-38) |
+| 413이 브라우저에 보이는지 미확인 | 프록시가 연결을 끊으면 `NETWORK_ERROR`로 보일 수 있음 | A-13. 클라이언트 사전 검사로 정상 경로에선 요청 자체가 안 나감. **배포 세션에서 확인**(413 JSON 도달) |
 | 깨진 요청 라인은 Tomcat HTML 400 | §5-1 형식 아님 | A-4. 정상 클라이언트는 못 만드는 요청 |
 | 업로드 파일 휘발성 | 재배포 시 삭제 | 의도(CONSIDERATIONS 3-3) |
 | 블랙리스트 방식 | 목록 밖 위험 확장자(`ps1`, `html` 등) 통과 | CONSIDERATIONS 7-5 |
 | 텍스트 실행 파일(`bat`·`cmd`·`js`)은 내용 검증 불가 | 확장자를 바꾸면 통과 | CONSIDERATIONS 2-1 |
-| 테스트 코드 없음 | 이 문서 §5의 수동 확인이 전부 | 테스트 세션 몫 |
+| 테스트 코드 없음 | 이 문서 §5의 수동 확인이 전부 | 테스트 세션 몫. **해소**: 테스트 세션 136개 → 보안 세션 166개 (VERIFICATION, SECURITY_REVIEW §9) |
 
 ## 7. 테스트 세션이 의심해야 할 지점
 
@@ -182,7 +183,7 @@ docker exec -i backend-postgres-1 psql -U extblock -d extblock < db/reset.sql
 - [x] `/data/uploads` 볼륨 없음(Render 무료는 볼륨 불가 — 의도와 일치).
 - [ ] 면접 전날 `/actuator/health`, 필요 시 `db/reset.sql` → README 배포 섹션.
 
-### 마감 세션
-- [ ] README 실행법에 §1 내용 + "최신 Docker Desktop 필요"(A-1) + 로컬 `APP_UPLOAD_STORAGE_DIR=./uploads`(A-2).
-- [ ] 스키마 문서 원본: `backend/src/main/resources/db/migration/V1__schema.sql`.
-- [ ] CONSIDERATIONS 부록 A-1~A-23을 본문 섹션 번호와 연결할지 결정(현재는 부록에 append만).
+### 마감 세션 — ✅ 완료
+- [x] README 실행법에 §1 내용 + "최신 Docker Desktop 필요"(A-1) + 로컬 `APP_UPLOAD_STORAGE_DIR=./uploads`(A-2).
+- [x] 스키마 문서 원본: `backend/src/main/resources/db/migration/V1__schema.sql` → README "DB 스키마"(컬럼·타입·제약·인덱스 이름은 `\d`로 확인).
+- [x] CONSIDERATIONS 부록 A를 본문 섹션 번호와 연결 → 본문 제목에 `→ A-n` 포인터 + guide 매핑표.

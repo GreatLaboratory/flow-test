@@ -11,7 +11,7 @@ Started ExtblockApplication in 81.396 seconds       # 0.1 CPU
 [gc,init] Memory: 512M
 [gc,init] Heap Max Capacity: 384M                   # MaxRAMPercentage=75 → 보안 세션 -Xmx384m과 동일
 
-## A-17 수정 전 (forward-headers-strategy=native, XFF 기준)
+## A-38 수정 전 — A-17 확인 항목 (forward-headers-strategy=native, XFF 기준)
 $ POST /api/extensions/custom  (XFF 없음)                   -> 201, audit client_ip=104.22.66.249
 $ POST ... -H 'X-Forwarded-For: 9.9.9.9'                    -> 201, audit client_ip=104.22.66.50
 $ POST ... -H 'X-Forwarded-For: 9.9.9.9, 10.0.0.1'          -> 201, audit client_ip=104.22.66.249
@@ -21,7 +21,7 @@ $ 같은 IP에서 업로드 14회 (한도 10/분)
 
 ## 수정: Render 환경변수 SERVER_TOMCAT_REMOTEIP_REMOTE_IP_HEADER=CF-Connecting-IP → 재배포 dep-dbemcugae00c73dkclgg
 
-## A-17 수정 후
+## A-38 수정 후
 $ POST (헤더 없음) name=plain1                               -> 201, audit client_ip=175.113.88.156
 $ POST -H 'X-Forwarded-For: 9.9.9.9' name=xffspoof1          -> 201, audit client_ip=175.113.88.156
 $ POST -H 'CF-Connecting-IP: 9.9.9.9' name=cfspoof1          -> 403 text/plain "error code: 1000" (server: cloudflare, 엣지에서 거부 — origin 미도달)

@@ -397,6 +397,7 @@ public class ApiException extends RuntimeException {
 - **깨진 multipart는 400**: `MultipartException`(크기 초과 제외)은 클라이언트 오류 → `INVALID_REQUEST`. 이전엔 500 + 요청당 약 6KB ERROR 스택 로그(S2, A-31).
 - **적용 대상**: `PUT|POST|DELETE /api/extensions/**` → policy 버킷, `POST /api/uploads` → upload 버킷. 키는 `"policy:" + ip` / `"upload:" + ip`. GET·정적 파일·actuator는 제한하지 않는다.
 - **버킷 설정**: 용량 n, `refillIntervally(n, 1분)` (1분마다 n개 충전 — 고정 창과 유사해 설명이 쉽다). Caffeine: `expireAfterAccess(10분)`, `maximumSize(100_000)`.
+  - **[정정 — 코드 세션 실측]** `expireAfterAccess`는 Bucket4j 8.14 `CaffeineProxyManager`와 함께 쓰면 `IllegalStateException`. 구현은 `expirationAfterWrite(basedOnTimeForRefillingBucketUpToMax(10분))` + `maximumSize(100_000)`(CONSIDERATIONS A-15, IMPL_NOTES §3-1).
 - **MZ 읽기와 저장**: `MultipartFile.getInputStream()`은 호출할 때마다 새 스트림을 연다. 앞 2바이트는 첫 스트림에서 `readNBytes(2)`로 읽어 닫고, 저장은 새 스트림으로 `FileStorage.save()`에 넘긴다.
 - **`MaxUploadSizeExceededException`**: DispatcherServlet이 multipart를 해석할 때 발생하므로 `GlobalExceptionHandler`에서 413으로 변환할 수 있다. 메시지의 `{max}`는 `AppProperties` 값으로 채운다.
 - **에러 message 치환**: `{name}`, `{limit}`, `{max}`, `{ext}`는 `ApiException` 생성 시 `String.replace`로 채운다(템플릿 엔진 불필요). 여러 확장자가 걸리면 `{ext}`에는 첫 번째 값을 넣고, `details.matched`에 전체를 담는다.
