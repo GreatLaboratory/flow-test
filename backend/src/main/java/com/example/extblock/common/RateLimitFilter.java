@@ -12,6 +12,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.web.util.ContentCachingRequestWrapper;
 
 import com.example.extblock.config.AppProperties;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -28,9 +29,16 @@ import tools.jackson.databind.json.JsonMapper;
  *
  * 주의: request.getParameter*()·getParts()를 호출하지 않는다 — multipart 파싱이 시작되면
  * 한도를 넘은 요청도 10MB를 끝까지 받게 된다. 판단은 메서드·경로·getRemoteAddr()만으로 한다.
+ * 이 필터보다 먼저 본문을 읽는 필터는 없어야 한다 — 그래서 FormContentFilter를 끈다(application.yml).
+ *
+ * 업로드 외 요청은 본문을 MAX_BODY에서 끊는다. multipart 크기 한도는 업로드에만 걸려 있어,
+ * 이것이 없으면 큰 JSON 하나로 OOM이 난다(SECURITY_REVIEW S1).
  */
 @Component
 public class RateLimitFilter extends OncePerRequestFilter {
+
+	/** 가장 큰 정상 본문은 {"name":"<20자>"}. 넉넉히 잡아도 KB 단위면 충분하다. */
+	private static final int MAX_BODY = 16 * 1024;
 
 	private static final Set<String> POLICY_METHODS = Set.of("PUT", "POST", "DELETE");
 
@@ -75,7 +83,20 @@ public class RateLimitFilter extends OncePerRequestFilter {
 				return;
 			}
 		}
-		chain.doFilter(request, response);
+		chain.doFilter("upload".equals(bucket) ? request : limitBody(request), response);
+	}
+
+	/**
+	 * Content-Length가 아니라 실제로 읽은 양으로 끊는다 → chunked 본문도 막힌다.
+	 * handleContentOverflow는 Spring이 "상한 초과 시 예외를 던지라"고 열어 둔 확장 지점이다.
+	 */
+	private static HttpServletRequest limitBody(HttpServletRequest request) {
+		return new ContentCachingRequestWrapper(request, MAX_BODY) {
+			@Override
+			protected void handleContentOverflow(int limit) {
+				throw new ApiException(ErrorCode.INVALID_REQUEST);
+			}
+		};
 	}
 
 	/**

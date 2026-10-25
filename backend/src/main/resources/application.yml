@@ -1,6 +1,12 @@
 spring:
   application:
     name: extblock
+  mvc:
+    formcontent:
+      filter:
+        # 이 앱엔 form 엔드포인트가 없다(JSON + multipart만). 켜 두면 PUT/DELETE urlencoded 본문을
+        # RateLimitFilter보다 먼저, 경로와 무관하게 통째로 메모리에 읽는다(SECURITY_REVIEW S1)
+        enabled: false
   # multipart 크기 한도는 ExtblockApplication#multipartConfigElement (app.upload.max-file-size 기준)
 
 server:

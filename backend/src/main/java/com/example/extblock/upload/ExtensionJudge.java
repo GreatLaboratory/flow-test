@@ -22,6 +22,9 @@ public final class ExtensionJudge {
 	// 끝의 '.'·' ' 반복 (Windows는 file.exe. 을 file.exe 로 저장). \z = 문자열 진짜 끝
 	private static final Pattern TRAILING_DOTS_SPACES = Pattern.compile("[. ]+\\z");
 
+	// U+0000~001F, U+007F. 정상 파일명엔 없다(Windows는 금지). a.exe\0 은 C API에서 a.exe로 잘리고, DEL은 화면에서 사라진다
+	private static final Pattern CONTROL = Pattern.compile("\\p{Cntrl}");
+
 	private ExtensionJudge() {
 	}
 
@@ -36,6 +39,9 @@ public final class ExtensionJudge {
 		if (baseName.isEmpty() || baseName.codePointCount(0, baseName.length()) > MAX_NAME_LENGTH) {
 			return new Verdict(ErrorCode.INVALID_FILENAME, baseName, List.of());
 		}
+		if (CONTROL.matcher(baseName).find()) {
+			return new Verdict(ErrorCode.INVALID_FILENAME_CHAR, baseName, List.of());
+		}
 
 		// 첫 구간(파일명 본체)을 제외한 모든 구간을 확장자로 본다: a.exe.txt → {exe, txt}, .env → {env}, exe.txt → {txt}
 		String trimmed = TRAILING_DOTS_SPACES.matcher(baseName).replaceAll("");
@@ -44,7 +50,8 @@ public final class ExtensionJudge {
 		}
 		List<String> matched = Arrays.stream(trimmed.split("\\."))
 			.skip(1)
-			.map(segment -> segment.toLowerCase(Locale.ROOT))
+			// 대문자를 거쳐 접는다: ſ(U+017F)→S→s, ı(U+0131)→I→i. ASCII는 그대로라 오탐 없음(J29~J31)
+			.map(segment -> segment.toUpperCase(Locale.ROOT).toLowerCase(Locale.ROOT))
 			.filter(blocked::contains)
 			.distinct()
 			.toList();

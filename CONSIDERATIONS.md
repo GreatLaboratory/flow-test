@@ -76,7 +76,7 @@
 - **경위**: AI가 처음엔 `[.;:]`를 구분자로 분할하는 안을 냈으나, 사람이 과설계를 지적했고 위협 모델 기준으로 다시 걸러 제외했다.
 - _계획 세션_
 
-### 1-11. 제어문자 / null byte `a.exe\0.jpg` `[+]` — ⛔ 의도적으로 제외함
+### 1-11. 제어문자 / null byte `a.exe\0.jpg` `[+]` — ⛔ 의도적으로 제외함 → **✅ 보안 세션에서 구현으로 변경 (A-32)**
 - **근거**: null byte에서 문자열이 잘리는 건 C 계열 API의 문제다. JS/Java 문자열은 `\0`에서 잘리지 않는다. 개행으로 인한 로그 인젝션은 구조화 로그(JSON)로 해결한다(운영 항목 참조).
 - _계획 세션_
 
@@ -92,7 +92,7 @@
 - **근거**: 확장자는 ASCII라 판정에 영향이 없다. 표시만 자모 분리로 깨지며, 원본명을 표시하기로 하면 `normalize('NFC')` 1줄로 해결한다.
 - _계획 세션_
 
-### 1-15. multipart `filename*`(RFC 5987)과 `filename` 불일치 `[+]` — ⛔ 의도적으로 제외함
+### 1-15. multipart `filename*`(RFC 5987)과 `filename` 불일치 `[+]` — ⛔ 의도적으로 제외함 (결론 유지, **근거 정정 A-34**: 파서는 2개)
 - **근거**: 파서 차이 공격은 WAF와 앱처럼 파서가 2개일 때만 성립한다. 우리는 판정과 저장을 같은 파서 하나로 처리한다.
 - _계획 세션_
 
@@ -282,7 +282,7 @@
 - **한계**: 재시작 시 초기화, IP를 바꿔가며 분산 공격하면 우회.
 - _계획 세션_
 
-### 5-4. 디스크 고갈 `[+]` — ⛔ 총량 제한은 제외
+### 5-4. 디스크 고갈 `[+]` — ⛔ 총량 제한은 제외 (결론 유지, **근거 교체 A-35**)
 - **근거**: 업로드마다 폴더 총 용량을 계산하는 건 비싸고 과설계. rate limit이 증가 속도를 제한하고, 휘발성 디스크는 재배포 시 초기화. 디스크가 가득 차 쓰기가 실패하면 3-6에 따라 부분 파일 삭제 + `STORAGE_FAILED`.
 - _계획 세션_
 
@@ -522,3 +522,45 @@
 ### A-29. 추가 버튼 이중 제출 가드는 React state 기반 `[+]` — 📝 사람 입력으로는 안전
 - **확인**: 키보드 Enter 2연타(지연 800ms 주입)는 POST 1건. 이벤트 사이에 렌더링되므로 `adding` 가드와 disabled 버튼(암묵적 제출 차단)이 작동한다. 같은 JS 태스크의 `requestSubmit()` 2회는 POST 2건 → 서버 409로 DB는 정상이지만 "이미 등록" 메시지가 뜬다. 사람 입력으로는 재현 불가라 P2·수용. 고치려면 `useRef` 동기 가드.
 - _테스트 세션_
+
+### A-30. 업로드 외 요청 본문 크기 상한이 없었다 → 단일 요청 OOM `[+]` — ✅ 구현함 (보안 세션, Medium)
+- **발견**: multipart 한도(B2)는 업로드에만 걸린다. ① Spring Boot 기본 `FormContentFilter`가 `PUT|PATCH|DELETE` + urlencoded 본문을 **RateLimitFilter보다 먼저, 경로와 무관하게** `StreamUtils.copyToString`으로 통째로 읽었다 — 인증 없는 `PUT /nope` 300MB 1개로 `OutOfMemoryError: Java heap space`(힙 384MB, 운영과 같은 상한). rate limit을 소진한 IP도 50MB를 끝까지 보냈다. ② JSON `@RequestBody`도 무제한 — `name` 100MB → OOM.
+- **결정**: ① `spring.mvc.formcontent.filter.enabled=false`(form 엔드포인트가 없어 쓰지 않는 공격면). ② RateLimitFilter가 업로드 외 요청을 `ContentCachingRequestWrapper(request, 16KB)`로 감싸 `handleContentOverflow`에서 400. 실제로 읽은 양 기준이라 chunked도 막힌다. 뿌리가 "업로드 외 본문 상한 없음" 하나라 모든 요청이 지나는 필터 한 곳에서 막았다.
+- **검증**: 수정된 jar에 같은 공격 → OOM 0, ERROR 0. 송신을 64KB/s로 묶었을 때 앱은 첫 64KB 안에서 응답(16KB 상한 + Jackson 읽기 버퍼). 테스트 R1~R6: 16384바이트 201 / 16385바이트 400 / chunked 1MB 400 / 업로드는 예외. 수정 전 코드에서 R1·R3·R4·R5 RED.
+- **왜 테스트 세션이 못 봤나**: 테스트는 "스펙에 있는 입력"을 검증했고, 스펙에는 JSON 본문 크기 규칙 자체가 없었다. 프레임워크가 기본으로 켜 둔 필터는 스펙에도 코드에도 보이지 않는다 — 실제 서버에 적대적 요청을 보내야 드러난다.
+- _보안 세션_
+
+### A-31. 깨진 multipart가 500 + 큰 ERROR 스택 로그 `[+]` — ✅ 구현함 (보안 세션, Low)
+- **발견**: 끝 경계 없음·`boundary` 없음·Tomcat이 거부하는 파일명(NUL)은 `MultipartException` → `isClientError`에 안 걸려 500 + 요청당 약 6KB ERROR 로그. 경로·rate limit 무관(약 60배 로그 증폭, 클라이언트 실수가 서버 장애로 집계).
+- **결정**: `isClientError`에 `MultipartException` 1줄 → 400 `INVALID_REQUEST`. 크기 초과는 더 구체적인 `MaxUploadSizeExceededException` 핸들러가 먼저 잡아 413 유지(U15).
+- **감수한 비용**: 임시 파일을 쓰다 디스크가 가득 찬 경우도 400. 그때는 최종 저장(`STORAGE_FAILED`)도 함께 실패해 원인이 드러난다.
+- _보안 세션_
+
+### A-32. 1-11 제외를 뒤집음: 제어문자 파일명 거부 `[+]` — ✅ 구현함 (보안 세션, Low)
+- **발견**: `filename*=UTF-8''a.exe%00` → 201 `"a.exe\u0000"`(구간 `exe\0`이라 exe 차단 회피), `%7F`(DEL) → 화면에 `'a.exe' 업로드 성공`. `filename*`은 Tomcat이 디코딩하지 않아 Tomcat의 NUL 검사를 지나 Spring에서야 디코딩된다.
+- **1-11 근거가 약했던 이유**: "Java 문자열은 `\0`에서 잘리지 않는다"는 맞지만, 판정의 목적은 이름이 OS·사람에게 무엇으로 보이는가다. C API는 `a.exe\0`을 `a.exe`로 자르고, DEL은 화면에서 사라진다. 실행 위험은 없어 Low지만, 정상 파일명엔 제어문자가 없어(Windows 금지) **오탐 비용이 0**이고, 면접관이 "exe를 막았는데 `a.exe` 성공"을 보는 것은 실제 감점 위험이다.
+- **결정**: §6-1 **3a단계** — basename에 `\p{Cntrl}`(U+0000~001F, U+007F)이 있으면 400 `INVALID_FILENAME_CHAR` "파일명에 허용되지 않는 문자(제어문자)가 포함되어 있습니다."(사유가 달라 code 분리, 사람 요청). 끝 정리 앞이라 `file.exe.\n`도 여기서 걸린다 → J28 기대값 변경(탭·개행 모두 `INVALID_FILENAME_CHAR`), VERIFICATION O4는 더 이상 성립하지 않음.
+- **남긴 것**: RTL·ZWJ 같은 `\p{Cf}`는 막지 않는다 — 정상 텍스트(이모지 ZWJ, 페르시아어 ZWNJ)에 쓰여 오탐이 생긴다(1-12 유지).
+- _보안 세션_
+
+### A-33. 대소문자 접기 호모글리프 `ſ`(U+017F)·`ı`(U+0131) `[+]` — ✅ 구현함 (미검증 가설에 대한 1줄 방어)
+- **가설**: `ſ`·`ı`는 대문자로 바꾸면 ASCII `S`·`I`다. Windows가 확장자 연결을 대소문자 무시로 비교할 때 이렇게 접는다면 `a.ſcr`(이전 201)가 `.scr`로 취급될 수 있다. Windows에서 확인하지 못했다.
+- **결정**: 판정 구간을 `toUpperCase(ROOT).toLowerCase(ROOT)`로 접는다(사람 결정: 확인 비용보다 1줄 방어가 싸다). `a.ſcr` `a.jſ` `setup.msı` → 차단(J29, 실제 파서 U21).
+- **오탐 없음을 테스트로 고정**: J30 — 출력 가능한 ASCII 전부에서 접기 결과 = 기존 소문자화 결과. J31 — `report.pdf` `홍길동 이력서.v2.pdf` `2024.10.24_회의록.pdf` `v1.2.3.zip` `Straße.txt` `données.CSV` 이모지·RTL·전각 이름 통과. 전각 `ｅｘｅ`는 접어도 ASCII가 되지 않아 1-13 판단 그대로.
+- _보안 세션_
+
+### A-34. 1-15 근거 정정: multipart 파일명 파서는 2개 `[+]` — 📝 명시 (결론 유지)
+- **사실**: Tomcat FileUpload가 파트를 파싱하고(`filename` 검사, NUL이면 `InvalidFileNameException`), Spring `StandardMultipartHttpServletRequest`가 `Content-Disposition`을 `ContentDisposition.parse`로 **다시** 파싱한다(`filename*` 우선, RFC 2047 디코딩). 두 파서는 실제로 다르게 본다(A-32의 NUL).
+- **결론 유지 근거**: 판정·응답·로그가 모두 Spring 값 **하나**(`getOriginalFilename()`)만 쓰므로 "판정은 통과, 다른 곳에선 다른 이름" 같은 엇갈림이 없다. `filename*` 우선은 RFC 6266(브라우저)과 같은 방향. 실측: `filename="a.txt"; filename*=…a.exe` → 422, 반대 → 201(`a.txt`), RFC 2047 `a.exe` → 422.
+- **교훈**: "파서가 하나"는 확인하지 않은 전제였다. 파서 차이 공격의 성립 여부는 파서 개수가 아니라 **결정에 쓰이는 값이 몇 개인가**로 따진다.
+- _보안 세션_
+
+### A-35. 5-4 근거 교체 + D2 정정 `[+]` — 📝 명시
+- **5-4**: 원래 근거 "업로드마다 폴더 총 용량 계산은 비싸다"는 허수아비였다 — `FileStore.getUsableSpace()`는 statfs 1회라 싸다. **진짜 근거**: 여유 공간 하한을 둬도 가득 찬 뒤 업로드 가용성은 돌아오지 않는다(multipart 임시 파일도 같은 디스크). 속도는 IP당 10회/분 × 10MB ≈ 6GB/시간, IPv6 /64 회전이면 per-IP 한도 무력 → 배포 디스크 크기·IPv6 수신 여부는 SECURITY_REVIEW §6 체크리스트. 결론(총량 제한 없음)은 유지.
+- **D2**: DESIGN §7-3·필터 주석의 "본문 파싱 전에 판단"은 업로드 경로에선 맞았지만, 앞선 `FormContentFilter`가 PUT/DELETE urlencoded 본문을 먼저 읽어 전제가 깨져 있었다(A-30). 문서 정정 + 필터 제거.
+- _보안 세션_
+
+### A-36. 모든 경로의 multipart 파싱, 업로드 교차 출처 요청 `[+]` — ⛔ 수용 (보안 세션, Info)
+- **multipart**: `DispatcherServlet`은 핸들러를 찾기 전에 multipart를 파싱한다(`POST /nope` + 12MB → 413). rate limit 밖에서 요청당 최대 11MB 임시 파일이 생기지만 요청 종료 시 삭제되고 상한이 있다 → 수용. A-30의 본문 래퍼는 Tomcat `getParts()`가 내부 스트림을 읽어 이것을 막지 못한다. 후보 `spring.servlet.multipart.resolve-lazily=true`는 미검증.
+- **교차 출처**: JSON API는 preflight에서 막힌다(ACAO 없음, `text/plain`은 400). 업로드(`multipart/form-data`)는 simple request라 다른 사이트가 방문자 브라우저로 보낼 수 있다. 무인증이라 공격자의 직접 호출과 권한이 같고, 남는 것은 방문자 IP로 rate limit을 분산하는 효과뿐 → 5-4 판단에 포함, 수용.
+- _보안 세션_

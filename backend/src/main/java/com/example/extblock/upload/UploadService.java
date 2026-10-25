@@ -57,7 +57,7 @@ public class UploadService {
 
 	private static ApiException toException(Verdict verdict) {
 		ErrorCode code = verdict.code();
-		if (code == ErrorCode.INVALID_FILENAME) {
+		if (code == ErrorCode.INVALID_FILENAME || code == ErrorCode.INVALID_FILENAME_CHAR) {
 			return new ApiException(code);
 		}
 		// 여러 확장자가 걸리면 message에는 첫 번째, details.matched에 전체

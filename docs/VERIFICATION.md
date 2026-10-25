@@ -88,7 +88,7 @@ document.dispatchEvent(new Event('visibilitychange'));   // 이후 0.3초 안에
 | O1 | `sh\0` → 서버가 `sh`로 저장 | §6-2 trim(Java)의 정의대로. 처음 세운 내 기대값(거부)이 틀렸던 것 — 테스트를 스펙에 맞게 정정 |
 | O2 | `{"name":123}` → 201 `"123"` | Jackson scalar coercion. 스펙 미규정, 결과가 정상 확장자라 무해 |
 | O3 | 켈빈 기호 `K`(U+212A) → `k`로 허용 | §6-2 순서상 소문자화 후 ASCII가 됨. 스펙대로 허용(사람 결정) |
-| O4 | `a.exe\t` 통과 | §6-1은 끝의 점·공백만 정리. Windows는 파일명에 제어문자를 허용하지 않아 실행 경로 없음(1-11) |
+| O4 | `a.exe\t` 통과 | §6-1은 끝의 점·공백만 정리. Windows는 파일명에 제어문자를 허용하지 않아 실행 경로 없음(1-11) → **보안 세션에서 변경**: 제어문자는 §6-1 3a에서 400 `INVALID_FILENAME_CHAR`(SECURITY_REVIEW S3, J28 갱신) |
 | O5 | 한도를 넘는 요청은 Tomcat이 연결을 끊어 클라이언트가 413을 못 받기도 함 | DESIGN §6-4가 예고한 현상. 클라이언트 사전 검사로 대응(E4) |
 | O6 | DuplicateKeyException 경로는 API로 도달 불가 | 잠금 아래에서는 INSERT 경쟁이 없음. spy로 사전 조회를 무력화해 409로 수렴함을 확인(P23) |
 

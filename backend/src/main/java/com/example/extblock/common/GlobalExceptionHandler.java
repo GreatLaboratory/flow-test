@@ -9,6 +9,7 @@ import org.springframework.web.ErrorResponse;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import com.example.extblock.config.AppProperties;
@@ -46,7 +47,7 @@ public class GlobalExceptionHandler {
 			return respond(ErrorBody.of(ErrorCode.NOT_FOUND));
 		}
 		if (isClientError(e)) {
-			// 잘못된 JSON, 지원하지 않는 메서드/Content-Type, 경로 변수 타입 불일치 등.
+			// 잘못된 JSON, 깨진 multipart, 지원하지 않는 메서드/Content-Type, 경로 변수 타입 불일치 등.
 			// 의도적 단순화: 405·415도 INVALID_REQUEST(400) 하나로 통일 (CONSIDERATIONS A-3)
 			return respond(ErrorBody.of(ErrorCode.INVALID_REQUEST));
 		}
@@ -58,7 +59,8 @@ public class GlobalExceptionHandler {
 	private static boolean isClientError(Exception e) {
 		return (e instanceof ErrorResponse er && er.getStatusCode().is4xxClientError())
 				|| e instanceof HttpMessageNotReadableException
-				|| e instanceof TypeMismatchException;
+				|| e instanceof TypeMismatchException
+				|| e instanceof MultipartException; // 크기 초과는 위 handleTooLarge가 먼저 잡는다(413). SECURITY_REVIEW S2
 	}
 
 	private static ResponseEntity<ErrorBody> respond(ErrorBody body) {

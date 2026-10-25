@@ -18,6 +18,7 @@ public enum ErrorCode {
 	MISSING_FILE(HttpStatus.BAD_REQUEST, "업로드할 파일이 없습니다."),
 	TOO_MANY_FILES(HttpStatus.BAD_REQUEST, "한 번에 하나의 파일만 업로드할 수 있습니다."),
 	INVALID_FILENAME(HttpStatus.BAD_REQUEST, "파일명이 없거나 255자를 초과합니다."),
+	INVALID_FILENAME_CHAR(HttpStatus.BAD_REQUEST, "파일명에 허용되지 않는 문자(제어문자)가 포함되어 있습니다."),
 	FILE_TOO_LARGE(HttpStatus.CONTENT_TOO_LARGE, "파일 크기는 최대 {max}까지 가능합니다."),
 	BLOCKED_EXTENSION(HttpStatus.UNPROCESSABLE_CONTENT, "'.{ext}' 확장자는 업로드가 차단되어 있습니다."),
 	BLOCKED_CONTENT(HttpStatus.UNPROCESSABLE_CONTENT, "파일 내용이 실행 파일(PE) 형식이라 차단되었습니다."),

@@ -3,6 +3,7 @@ package com.example.extblock.upload;
 import static com.example.extblock.common.ErrorCode.BLOCKED_CONTENT;
 import static com.example.extblock.common.ErrorCode.BLOCKED_EXTENSION;
 import static com.example.extblock.common.ErrorCode.INVALID_FILENAME;
+import static com.example.extblock.common.ErrorCode.INVALID_FILENAME_CHAR;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.Locale;
@@ -162,10 +163,40 @@ class ExtensionJudgeTest {
 		}
 	}
 
-	@Test // J28 끝의 '.'·공백만 정리(§6-1). 탭은 위협 모델 밖, 개행은 \z 처리
+	@Test // J28 제어문자는 끝 정리 전에 거부(§6-1 3a, SECURITY_REVIEW S3). 원래는 탭 허용·개행은 \z로 차단이었다
 	void controlCharTail() {
-		assertThat(judge("a.exe\t").allowed()).isTrue();
-		assertThat(judge("file.exe.\n").code()).isEqualTo(BLOCKED_EXTENSION);
+		assertThat(judge("a.exe\t").code()).isEqualTo(INVALID_FILENAME_CHAR);
+		assertThat(judge("file.exe.\n").code()).isEqualTo(INVALID_FILENAME_CHAR);
+	}
+
+	// J32 제어문자 어디든(U+0000~001F, U+007F) — 정책과 무관하게 거부
+	@ParameterizedTest
+	@ValueSource(strings = {"a.exe\u0000", "a.exe\u0000.jpg", "a.exe\u0001", "a.exe\u007F", "a\rb.txt", "\u001Freport.pdf"})
+	void controlCharsRejected(String name) {
+		assertThat(ExtensionJudge.judge(name, NONE, Set.of()).code()).isEqualTo(INVALID_FILENAME_CHAR);
+	}
+
+	// J29 대소문자 접기 호모글리프: ſ(U+017F)·ı(U+0131)는 대문자로 바꾸면 ASCII S·I
+	@ParameterizedTest
+	@ValueSource(strings = {"a.\u017Fcr", "a.j\u017F", "a.\u017FCR", "setup.ms\u0131"})
+	void caseFoldHomoglyphsBlocked(String name) {
+		assertThat(ExtensionJudge.judge(name, NONE, Set.of("scr", "js", "msi")).code()).isEqualTo(BLOCKED_EXTENSION);
+	}
+
+	@Test // J30 접기는 ASCII에 대해 기존 소문자화와 같다 → 정상 확장자 판정이 바뀌지 않음
+	void foldIsIdentityOnAscii() {
+		for (char c = 0x20; c < 0x7F; c++) {
+			String s = String.valueOf(c);
+			assertThat(s.toUpperCase(Locale.ROOT).toLowerCase(Locale.ROOT)).as("U+%04X", (int) c).isEqualTo(s.toLowerCase(Locale.ROOT));
+		}
+	}
+
+	// J31 정상 파일명은 접기·제어문자 검사 뒤에도 통과(오탐 없음)
+	@ParameterizedTest
+	@ValueSource(strings = {"report.pdf", "홍길동 이력서.v2.pdf", "2024.10.24_회의록.pdf", "v1.2.3.zip", "John.Doe_CV.pdf",
+			"Straße.txt", "données.CSV", "사진\uD83D\uDE00.jpg", "inv\u202Eexe.jpg", "a.ｅxe"})
+	void normalNamesStillAllowed(String name) {
+		assertThat(ExtensionJudge.judge(name, NONE, Set.of("exe", "scr", "js", "msi", "sh", "bat", "com")).allowed()).as(name).isTrue();
 	}
 
 }
