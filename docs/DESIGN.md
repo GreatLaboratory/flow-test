@@ -18,7 +18,7 @@
 | 업로드 + 서버 판정 (확장자 + MZ 시그니처) | 압축 파일 내부 검사, 백신 스캔 |
 | 정책 변경 감사 테이블 | 다중 파일 업로드, 진행률 표시 |
 | IP 기준 rate limit | 화이트리스트 모드, 사용자별 정책 |
-| Railway 배포 | 실시간 동기화(WebSocket/polling) |
+| 배포 (Render + Neon, A-37) | 실시간 동기화(WebSocket/polling) |
 
 ## 1. 위협 모델 (모든 판단의 기준)
 
@@ -42,7 +42,7 @@
 | Rate limit | **Bucket4j core + Caffeine `ProxyManager`** | 저장소 경계(`ProxyManager`)를 라이브러리가 제공 → Redis 전환 시 ProxyManager만 교체. Caffeine 만료로 IP 키 메모리 누수 방지 | 직접 구현(`ConcurrentHashMap` 키 무한 증가), starter(Boot 4 호환 미확인) |
 | 로그 | **Spring Boot 내장 structured logging** (`logging.structured.format.console`) | JSON 한 줄 출력이 프레임워크 기본 기능. 개행 이스케이프로 로그 인젝션 해결 | logback 커스텀 인코더 |
 | 헬스체크 | **Spring Boot Actuator** (`health`만 노출) | 이미 있는 기능. DB 연결까지 확인 | 직접 구현 |
-| 배포 | **Railway Hobby** (월 $5) | 면접 당일 접속 = 필수 제출물. 슬립·cold start·DB 만료 위험 제거 | Vercel(요청 본문 약 4.5MB 한도·로컬 디스크 없음·메모리 rate limit 무의미 → **설계상 탈락**), Render 무료(Postgres 30일 만료), Lightsail(직접 운영 부담), 클라우드타입(디스크 임시) |
+| 배포 | ~~Railway Hobby~~ → **Render 무료(웹, Docker) + Neon 무료(Postgres)** (배포 세션 변경, CONSIDERATIONS A-37) | 면접 당일 접속 = 필수 제출물. Railway는 10/21 보안 사고 후 신규 가입이 막혀 사용 불가. Render 무료 DB는 30일 만료라 DB만 Neon. 대가: 15분 무요청 시 슬립(첫 접속 1~2분) | Vercel(요청 본문 약 4.5MB 한도·로컬 디스크 없음·메모리 rate limit 무의미 → **설계상 탈락**), Render 무료(Postgres 30일 만료), Lightsail(직접 운영 부담), 클라우드타입(디스크 임시) |
 
 > ⚠️ **AI 활용 주의**: Boot 4는 Jackson 3, starter 모듈화 등 3.x와 다르다. AI가 Boot 3 시절 패턴을 낼 수 있으므로 코드 세션은 의존성 좌표·패키지명을 공식 문서로 검증한다.
 
@@ -51,7 +51,7 @@
 ## 3. 시스템 구성
 
 ```
- Browser ──HTTPS──▶ Railway edge proxy ──▶ [ Spring Boot container ]
+ Browser ──HTTPS──▶ Cloudflare ─▶ Render LB ──▶ [ Spring Boot container ]   (Render free, singapore)
                                               ├─ static/   (React build, same origin)
                                               ├─ /api/**   (REST)
                                               ├─ /actuator/health
@@ -59,11 +59,11 @@
                                               └─ /data/uploads  (ephemeral disk, UUID files)
                                                      │
                                                      ▼
-                                           [ Railway PostgreSQL ]
+                                           [ Neon PostgreSQL 17 ]   (ap-southeast-1, direct endpoint)
 ```
 
 - 서버 **1대** 전제(메모리 rate limit). 다중 인스턴스 전환 경로는 §10.
-- Railway 컨테이너 디스크는 **휘발성**이다. 업로드 파일은 재배포 시 사라진다 → 의도적으로 수용(파일을 다시 읽는 기능이 없음 + 남용으로 디스크가 차도 재배포 시 초기화).
+- Render 컨테이너 디스크는 **휘발성**이다(재배포·재시작·슬립 시 삭제). 업로드 파일은 재배포 시 사라진다 → 의도적으로 수용(파일을 다시 읽는 기능이 없음 + 남용으로 디스크가 차도 재배포 시 초기화).
 
 ### 저장소 구조
 
@@ -386,7 +386,7 @@ public class ApiException extends RuntimeException {
 
 - `server.forward-headers-strategy=native` → Tomcat `RemoteIpValve`가 **신뢰하는 프록시가 붙인 값만** 반영해 `getRemoteAddr()`를 교정한다.
 - 앱 코드는 `X-Forwarded-For`를 **직접 파싱하지 않는다** — 맨 왼쪽 값은 클라이언트가 위조 가능.
-- Railway 프록시 IP가 기본 신뢰 대역(사설 IP)에 드는지는 **배포 세션이 확인**하고, 필요 시 `server.tomcat.remoteip.internal-proxies`를 조정한다.
+- 배포 환경(Render)에서는 XFF 마지막 값이 Cloudflare 엣지 IP라 그대로는 클라이언트 IP가 되지 않는다 → 배포 환경변수 `SERVER_TOMCAT_REMOTEIP_REMOTE_IP_HEADER=CF-Connecting-IP`로 Cloudflare가 덮어쓰는 단일 값 헤더를 읽는다(CONSIDERATIONS A-38, 배포 세션 실측).
 
 ### 7-3. 구현 세부 규칙 (자족성 점검에서 보강)
 
@@ -445,8 +445,9 @@ frontend/src/
 | `app.policy.custom-limit` | `200` | `APP_POLICY_CUSTOM_LIMIT` | GET 응답 `customLimit`로 노출 |
 | `app.rate-limit.policy-per-minute` | `30` | `APP_RATE_LIMIT_POLICY_PER_MINUTE` | 변경 API(PUT/POST/DELETE) |
 | `app.rate-limit.upload-per-minute` | `10` | `APP_RATE_LIMIT_UPLOAD_PER_MINUTE` | |
-| `server.port` | `${PORT:8080}` | `PORT` | Railway 주입 |
-| `spring.datasource.*` | — | `SPRING_DATASOURCE_URL/USERNAME/PASSWORD` | Railway Postgres 변수 연결 |
+| `server.port` | `${PORT:8080}` | `PORT` | Render 주입(10000) |
+| `spring.datasource.*` | — | `SPRING_DATASOURCE_URL/USERNAME/PASSWORD` | Neon 연결 문자열을 JDBC 형식으로 분해 |
+| `server.tomcat.remoteip.remote-ip-header` | `X-Forwarded-For` | `SERVER_TOMCAT_REMOTEIP_REMOTE_IP_HEADER` | **배포에서만** `CF-Connecting-IP` (A-38) |
 
 multipart 요청 한도 = `app.upload.max-file-size` + 1MB(경계·헤더 오버헤드)로 **자동 연동**한다(`MultipartConfigElement` 빈). 원래는 `max-request-size: 11MB` 고정값이었으나, 파일 한도를 올리면 메시지·`maxFileSize`와 실제 거절 지점이 어긋나는 것을 테스트 세션이 발견(VERIFICATION B2). `-1`(무제한)은 Tomcat `max-part-count` 기본 50 때문에 요청당 임시 디스크가 50배까지 커져 기각.
 `management.endpoints.web.exposure.include=health`, `management.endpoint.health.show-details=never`.
@@ -641,12 +642,12 @@ multipart 요청 한도 = `app.upload.max-file-size` + 1MB(경계·헤더 오버
 
 ## 14. 세션 핸드오프 체크 항목
 
-**배포 세션**
-- Railway 프록시가 `RemoteIpValve` 기본 신뢰 대역에 드는지 확인 → 실제 클라이언트 IP가 기록되는지 검증
-- Railway Postgres 변수 → `SPRING_DATASOURCE_*` 연결, `PORT` 주입 확인
-- 컨테이너 메모리 한도와 JVM 힙 설정
-- 면접 전날 `/actuator/health` 확인, 필요 시 `/db/reset.sql` 실행
-- 배포 플랫폼 조건(요금·한도)을 공식 문서로 재확인 (계획 세션 수치는 일부 2차 자료)
+**배포 세션** — ✅ 완료(배포처는 Render + Neon으로 변경, 결과는 SECURITY_REVIEW §6·`docs/verification/deploy-check.log`)
+- ✅ 실제 클라이언트 IP 기록 — 기본값으론 Cloudflare IP가 기록됨 → `CF-Connecting-IP`로 교정 (A-38)
+- ✅ DB 변수 → `SPRING_DATASOURCE_*` 연결, `PORT`=10000 주입 확인
+- ✅ 컨테이너 512MB → 힙 상한 384MB (`-Xlog:gc+init` 로그)
+- 면접 전날 `/actuator/health` 확인, 필요 시 `/db/reset.sql` 실행 (README 배포 섹션)
+- ✅ 배포 플랫폼 조건 공식 문서 재확인 (A-37)
 
 **보안 세션**: §12 T6 전부 + Actuator 노출 범위 + 업로드 저장 경로 권한 + 의존성 취약점
 
@@ -668,3 +669,5 @@ multipart 요청 한도 = `app.upload.max-file-size` + 1MB(경계·헤더 오버
 | 8 | 프론트 | Vanilla JS 추천 | 사람이 React 선택(익숙함 + 자동 이스케이프) | React + Vite + TS |
 | 9 | API 식별자 | name 경로 | 사람이 "id가 일반적이지 않나" 질문 → AI 재검토 중 **오래된 탭 삭제 결함 발견** | id 경로 |
 | 10 | 배포 | Railway 추천 | 사람이 Lightsail 문의 → 운영 부담 비교 | Railway Hobby |
+| 11 | 배포처 변경 (배포 세션) | Railway Trial(사람이 무료 선택) | Railway 가입 불가(사고 후 가입 중단) → AI가 Render+Neon / Koyeb 비교, 사람이 Render+Neon 결정 | Render 무료 + Neon 무료 (A-37) |
+| 12 | 클라이언트 IP (배포 세션) | 설계: `RemoteIpValve` 기본값으로 충분 | 실측에서 CF IP 기록·rate limit 우회 발견 → AI가 `CF-Connecting-IP` 1줄 제안, 사람 승인 | 배포 환경변수 1줄 (A-38) |

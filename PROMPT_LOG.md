@@ -12,6 +12,7 @@
 | 2 코드 (2026-10-24) | `prompts/raw/20261024-2149-5a6fcc88-ef84-40d4-8be6-8e3c0d26f8b8.md` | 로컬 보관만 (같은 이유) |
 | 3 테스트/검증 (2026-10-24) | `prompts/raw/20261024-2252-026151b7-cc58-4f58-bf3a-8f8541af17f7.md` | 로컬 보관만 (같은 이유) |
 | 4 보안 (2026-10-25) | `prompts/raw/20261025-1008-d169e994-7eac-4a04-b870-4492107d7073.md` | 로컬 보관만 (같은 이유) |
+| 5 배포 (2026-10-25) | `prompts/raw/20261025-1129-c13b273b-8724-42de-8f0c-8890a4017e51.md` | 로컬 보관만 (같은 이유) |
 
 ## 프롬프트 큐레이션 (2층)
 
@@ -306,6 +307,30 @@
 #### 1층 추출 누락분
 - 1층 추출(10:08) 이후의 프롬프트는 다음 추출 때 포함된다.
 
+### [배포 세션] 2026-10-25 — 초안 (AI 작성, 사람 검토 필요)
+
+> **세션 성격**: "배포됐다"가 아니라 "외부에서 차단이 실제로 동작하고 §6 체크리스트가 통과한다"가 완료 기준(사람 대본). 배포 전 전략 제안 → 사람 확인, 보안 결함 발견 시 심각도·수정안 보고 → 사람 승인 후 수정·재배포·재검증 순서를 대본이 고정했다.
+
+#### ★ 하이라이트 1 — 배포 환경에서만 드러나는 Medium(A-38)
+
+| 단계 | 무엇이 일어났나 | 누가 |
+|---|---|---|
+| 1. 사전 예측 | 공식 문서 + jar 메타데이터(`internal-proxies` 기본값에 `100.64.0.0/10` 포함)로 "Railway면 기본값으로 통과할 가능성이 높다, 단 실측으로 확정" | agent |
+| 2. 실측 | Render로 바뀐 뒤 감사 `client_ip` = `104.22.66.x`(Cloudflare). XFF 위조는 막혔지만 **업로드 14회 모두 201** | agent |
+| 3. 원인 | Cloudflare가 XFF에 덧붙이기만 함 → `RemoteIpValve`가 오른쪽 첫 비신뢰 값(CF IP)에서 멈춤. 대안 2개(CF 대역 전체 신뢰 vs `CF-Connecting-IP`) 비교, 전자는 Workers 등 CF 출발 요청까지 신뢰해 기각 | agent |
+| 4. 승인 | "승인할게." — 환경변수 1줄 | **사람** |
+| 5. 닫힘 | 감사 IP = 내 공인 IP, `CF-Connecting-IP` 위조는 Cloudflare가 403(1000)으로 엣지에서 거부, 업로드 11번째·정책 31번째 429 | agent |
+
+#### ★ 하이라이트 2 — 플랫폼 사고에 따른 배포처 변경(A-37)
+- 사람이 요금제를 **Trial(무료)**로 선택 → 가입 단계에서 "Sign ups are currently disabled". 사람이 Railway 공지(10/21 보안 사고 후속)를 붙여 "영향이 있을까?"라고 질문.
+- agent: 가입 중단이 사고 대응 시기와 겹치고, 재개되어도 면접일 안정성을 장담하기 어렵다고 판단 → Render+Neon / Koyeb을 공식 문서 수치로 비교. Neon 무료 100 CU-시간과 keep-alive 핑의 충돌(24시간 깨어 있으면 186 CU-시간)을 근거로 **핑을 두지 않는 쪽**을 제안.
+- 사람: "Render + Neon으로 전환해서 진행해".
+
+#### AI가 틀렸다가 바로잡은 것 (정직 기록)
+- **리전 오판**: DNS의 `gcp-us-west1-1.origin.onrender.com`만 보고 "서비스가 Oregon에 있다, Neon(Singapore)과 리전 불일치"라고 보고했다. Render CLI로 서비스 정보를 보니 `region: singapore`였다. DNS 이름은 Cloudflare 경유 레코드일 뿐이었다 → 다음 보고에서 정정.
+- **클립보드 안내 실수**: Neon 연결 문자열 저장 명령을 "복사해서 실행"하라고 안내해, 명령 복사가 클립보드를 덮어써 파일에 명령 자체가 저장됐다. 또 zsh에서 `$_`가 의도와 다르게 동작했다. 순서(명령 입력 → URL 복사 → Enter)를 바꿔 다시 안내했다. 비밀번호는 채팅에 노출하지 않고 길이만 확인.
+- **CLI 로그인 대기**: `railway login`이 브라우저 콜백 5분 타임아웃으로 실패 → `--browserless`·토큰 방식 제안(결국 가입 자체가 막혀 무의미해짐).
+
 ---
 
 ## 스킬 / 플러그인 / 도구 사용 기록 (가이드 4-2)
@@ -360,3 +385,14 @@
 - scratchpad 복사본 시제품 — 승인 전에 수정안 4개를 레포 밖에서 적용해 같은 공격 + 기존 테스트 136개로 효과·영향 확인(레포 무변경)
 - JUnit 5 + Testcontainers + Java `HttpClient`(`BodyPublishers.ofInputStream` = chunked) — 회귀 테스트 R1~R6·U19~U21·J28~J32
 - Docker / `psql` / `jq` — 감사 `client_ip`로 XFF 해석 확인, `db/reset.sql` 원복, 1층 추출
+
+### 세션 5 — 배포
+- `anthropic-skills:chrome-browser`(claude-in-chrome) 스킬 + MCP 도구(navigate·find·javascript_tool·gif_creator·screenshot) — 배포 URL에서 핵심 플로우(exe 체크 → `sh` 추가 → `setup.exe`·`deploy.sh` 거부 → `report.pdf` 201)를 실제 구동해 GIF로 남기고, `fetch`로 클라이언트 크기 검사를 우회해 413이 브라우저에 JSON으로 보이는지 확인(A-13). 파일 선택은 `DataTransfer`로 주입
+- WebFetch / WebSearch — DESIGN §14 지시대로 배포처 조건을 **공식 문서**로 재확인(Railway 요금·Trial·프록시 헤더, Render 무료·`CF-Connecting-IP`, Neon 무료 한도). 상충하는 커뮤니티 답변(XFF 덮어쓰기 vs 덧붙이기)은 결론에 쓰지 않고 실측으로 확정
+- Spring Boot 설정 메타데이터(`spring-configuration-metadata.json`)를 jar에서 직접 확인 — `server.tomcat.remoteip.internal-proxies` 기본값
+- Render CLI(`render services/logs/deploys`) + Render REST API(환경변수 설정) — 리전·플랜 확인, 기동 로그(PORT·Flyway·힙), 승인된 환경변수 반영·재배포
+- `postgres:17` 컨테이너의 `psql` — Neon 연결 확인, 감사 `client_ip` 조회, `db/reset.sql` 실행(README 명령 그대로 검증)
+- curl / dig — §6 체크리스트(XFF·`CF-Connecting-IP` 위조, 12MB 413, 300MB·100MB S1 재공격, rate limit 11·31회, AAAA 레코드)
+- `superpowers:verification-before-completion` 원칙 — "통과"라고 적기 전에 모든 항목의 실제 출력을 `docs/verification/deploy-check.log`에 남기고, 확인하지 못한 것(디스크 크기, 두 네트워크 버킷 분리)은 미확인으로 기록
+- `ponytail` / `caveman` 플러그인 (세션 훅으로 상시 활성) — 수정은 코드가 아니라 배포 환경변수 1줄, 보고는 간결하게(보안 경고는 평문)
+

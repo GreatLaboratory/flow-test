@@ -11,12 +11,13 @@
 | **S1** | **Medium** | 업로드 외 요청은 **본문 크기 상한이 없다** → 인증 없이 요청 1개로 `OutOfMemoryError` (urlencoded는 rate limit보다 **먼저**, 모든 경로에서) | ✅ 수정 반영 (A-30) |
 | **S2** | Low | 깨진 multipart → **500 + 요청당 약 6KB ERROR 스택 로그**. 경로·rate limit 무관 → 로그 증폭, 클라이언트 오류가 서버 장애로 집계됨 | ✅ 수정 반영 (A-31) |
 | **S3** | Low | 제어문자 파일명 통과: `filename*=UTF-8''a.exe%00` → 201 `"a.exe\u0000"`, DEL(`%7F`)은 화면에 **`'a.exe' 업로드 성공`** 으로 보임. CONSIDERATIONS 1-11 제외 근거를 뒤집음 | ✅ 수정 반영 (A-32) + `ſ` 접기 (A-33) |
+| **S6** | **Medium** | (배포 세션) 배포 환경에서 클라이언트 IP가 Cloudflare 엣지 IP로 기록 → per-IP rate limit 우회(업로드 14/14 통과)·사용자 간 버킷 공유·감사 IP 무의미 | ✅ 배포 환경변수 1줄로 수정·재검증 (A-38, §6) |
 | S4 | Info | multipart 파싱은 **모든 경로**에서 일어난다(`POST /nope` + 12MB → 413). rate limit 밖에서 요청당 임시 디스크 최대 11MB를 쓸 수 있음(영구 저장은 아님) | ⛔ 수용 (A-36) |
 | S5 | Info | 업로드는 교차 출처 simple request라 다른 사이트가 방문자 브라우저로 업로드시킬 수 있음(방문자 IP로 rate limit 분산). JSON API는 preflight에서 막힘(확인) | ⛔ 수용 (A-36) |
 | D1 | 문서 불일치 | CONSIDERATIONS 1-15 "파서가 하나"는 사실이 아님 — Tomcat FileUpload와 Spring `ContentDisposition` **두 개**. 결론(제외)은 유지 | ✅ 문서 정정 (A-34) |
 | D2 | 문서 불일치 | `RateLimitFilter` 주석·DESIGN §7-3 "본문 파싱 전에 판단" — 업로드 경로는 맞지만, `FormContentFilter`가 **앞에서** PUT/DELETE urlencoded 본문을 끝까지 읽는다(S1의 원인) | ✅ 정정 + 필터 제거 (DESIGN §7-3, A-35) |
 
-**인계 3건**: A-4 ✅ 버전·스택 미노출 확인 · A-16 ✅ 변형 24개 중 우회 0 · A-17 로컬 동작 ✅ / 배포 동작은 **미검증** → §6 체크리스트.
+**인계 3건**: A-4 ✅ 버전·스택 미노출 확인 · A-16 ✅ 변형 24개 중 우회 0 · A-17 로컬 동작 ✅ / 배포 동작 → §6에서 **결함 발견(Cloudflare IP 기록) → 수정·재검증 ✅** (A-38).
 
 ---
 
@@ -179,30 +180,34 @@ private static HttpServletRequest limitBody(HttpServletRequest request) {
 
 ---
 
-## 6. 배포 세션 체크리스트 (지금 환경에서 검증 불가 — "검증했다"고 적지 않음)
+## 6. 배포 세션 체크리스트 — 실행 결과 (배포 세션, 2026-10-25)
 
-`$URL` = 배포 주소. 결과는 이 표 옆에 기록할 것.
+`$URL` = `https://extblock.onrender.com` (Render 무료 + Neon, 배포처 변경 경위는 CONSIDERATIONS A-37). 원본 출력: `docs/verification/deploy-check.log`.
+내 공인 IP = `175.113.88.156`.
 
-**A-17 신뢰 프록시 (필수)**
-- [ ] 커스텀 1개 추가 후 `select client_ip from policy_audit order by id desc limit 1` = **내 공인 IP**(`curl -s ifconfig.me`)인가? 프록시 IP가 찍히면 전 사용자가 버킷 하나를 공유한다 → `server.tomcat.remoteip.internal-proxies` 조정.
-- [ ] 위조 시도: `curl -X POST -H 'X-Forwarded-For: 9.9.9.9' -H 'Content-Type: application/json' -d '{"name":"xff"}' $URL/api/extensions/custom` → 감사 `client_ip`가 **9.9.9.9가 아니어야** 한다(9.9.9.9면 위조 허용 = rate limit·감사 무력). 확인 후 삭제.
-- [ ] 같은 위조를 `X-Forwarded-For: 9.9.9.9, 10.0.0.1` 형태로도 한 번.
-- [ ] 서로 다른 네트워크 2곳(예: 와이파이 / 휴대폰 테더링)에서 업로드 11회씩 → 각자 11번째만 429인가(버킷 분리).
+**A-17 신뢰 프록시 (필수)** — ❌ 발견 → ✅ 수정·재검증 (A-38, Medium)
+- [x] 감사 `client_ip` = 내 공인 IP인가? → **수정 전 ❌** `104.22.66.249`/`.50`(Cloudflare 엣지). `server.tomcat.remoteip.remote-ip-header=CF-Connecting-IP`(Render 환경변수, 사람 승인) 후 **✅ `175.113.88.156`**.
+- [x] 위조 `X-Forwarded-For: 9.9.9.9` → 수정 전·후 모두 9.9.9.9 **기록 안 됨 ✅**. 수정 후 추가 위조 `CF-Connecting-IP: 9.9.9.9` → Cloudflare가 엣지에서 **403 `error code: 1000`**(origin 미도달) ✅.
+- [x] `X-Forwarded-For: 9.9.9.9, 10.0.0.1` → 수정 전 CF IP, 수정 후 같은 형태 + `CF-Connecting-IP: 10.0.0.1` → 403 ✅.
+- [ ] 서로 다른 네트워크 2곳에서 업로드 11회씩 → **사람 결정으로 생략**(이 회선 하나뿐). 근거: 키가 실제 클라이언트 IP임은 감사 `client_ip`와 아래 429 결과로 확인됨.
 
-**A-13 / §7-18 413 노출**
-- [ ] curl로 12MB 업로드 → 413 JSON을 받는가, 프록시 HTML/연결 끊김인가.
-- [ ] 브라우저 개발자도구에서 크기 검사를 우회해(`fetch`로 12MB `FormData` 전송) 화면 메시지가 `FILE_TOO_LARGE`인지 `NETWORK_ERROR`인지.
+**A-13 / §7-18 413 노출** — ✅
+- [x] curl 12MB → **413 JSON** `FILE_TOO_LARGE`(1.2초). 프록시 HTML·연결 끊김 아님.
+- [x] 브라우저 `fetch` 12MB `FormData`(클라이언트 검사 우회) → **413 `application/json`** → 화면은 `FILE_TOO_LARGE` 메시지 경로(`NETWORK_ERROR` 아님). `docs/verification/deploy/a13-browser-413-json.jpg`.
 
-**프록시 뒤 rate limit**
-- [ ] 같은 IP로 업로드 10회 → 11회째 429, 정책 변경 30회 → 31회째 429.
-- [ ] 배포가 **IPv6 수신**을 하는가(`curl -6 $URL/actuator/health`). 된다면 per-IP 키가 /64 회전에 무력 → 키를 IPv6 /64 접두사로 바꾸는 안을 마감 전에 결정.
+**프록시 뒤 rate limit** — ❌ → ✅
+- [x] 수정 전: 같은 IP 업로드 14회 **모두 201**(버킷이 CF IP별로 분산). 수정 후: 업로드 10×201 → 11번째 **429** ✅, 정책 변경 30회 → 31번째부터 **429** ✅.
+- [x] IPv6 수신: `extblock.onrender.com`에 **AAAA 레코드 없음** → IPv4 전용. /64 회전 우회는 현재 배포에서 해당 없음(플랫폼이 IPv6를 열면 재검토).
 
-**S1 (수정 반영 후)**
-- [ ] `head -c 300000000 /dev/zero | tr '\0' a | curl -X PUT -H 'Content-Type: application/x-www-form-urlencoded' --data-binary @- $URL/nope` → 즉시 끊기는가, 로그에 `OutOfMemoryError`가 없는가.
-- [ ] 수정 전 상태로 배포됐다면: 프록시가 요청 본문 크기를 제한하는지 같은 명령으로 확인(제한이 있다면 S1 위험이 그만큼 줄어든다).
+**S1 (수정 반영 후)** — ✅
+- [x] `PUT /nope` urlencoded 300MB → 404, 6.2초. **로그 `OutOfMemoryError` 0, ERROR 0**, health UP. JSON 100MB → 400.
+- [x] 프록시 본문 크기 제한: **없음**(300MB 전부 전송됨) → 앱 상한이 유일한 방어선(A-39).
 
-**디스크 (5-4)**
-- [ ] 컨테이너 디스크 크기(`df -h /data/uploads /tmp`, 가능하면) → 100MB/분/IP 기준으로 가득 차는 시간을 계산해 기록.
+**디스크 (5-4)** — ⚠️ 미확인
+- [ ] `df -h`: Render 무료 인스턴스는 셸 미지원(`render ssh` → "Host key verification failed"), 공식 문서에도 무료 디스크 크기 없음 → **크기 미확인**. 대신: 디스크는 재배포·재시작·**15분 슬립마다 초기화**된다(Render 무료 문서). per-IP 10회/분 × 10MB = 100MB/분이 A-38 수정 후에야 실제로 IP당 상한이 된다. 가득 차면 `render restart`로 복구.
+
+**배포 환경 기본값 확인**
+- `PORT` 주입 → `Tomcat started on port 10000` ✅ · Flyway V1·V2 적용 ✅ · 컨테이너 `Memory: 512M` → `Heap Max Capacity: 384M` ✅ (보안 세션 `-Xmx384m`과 같은 조건) · 기동 81초(0.1 CPU).
 
 ---
 
