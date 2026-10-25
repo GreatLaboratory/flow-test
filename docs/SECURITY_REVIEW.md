@@ -189,7 +189,7 @@ private static HttpServletRequest limitBody(HttpServletRequest request) {
 - [x] 감사 `client_ip` = 내 공인 IP인가? → **수정 전 ❌** `104.22.66.249`/`.50`(Cloudflare 엣지). `server.tomcat.remoteip.remote-ip-header=CF-Connecting-IP`(Render 환경변수, 사람 승인) 후 **✅ `175.113.88.156`**.
 - [x] 위조 `X-Forwarded-For: 9.9.9.9` → 수정 전·후 모두 9.9.9.9 **기록 안 됨 ✅**. 수정 후 추가 위조 `CF-Connecting-IP: 9.9.9.9` → Cloudflare가 엣지에서 **403 `error code: 1000`**(origin 미도달) ✅.
 - [x] `X-Forwarded-For: 9.9.9.9, 10.0.0.1` → 수정 전 CF IP, 수정 후 같은 형태 + `CF-Connecting-IP: 10.0.0.1` → 403 ✅.
-- [ ] 서로 다른 네트워크 2곳에서 업로드 11회씩 → **사람 실행 필요**(이 회선 하나뿐). 같은 네트워크 기준 버킷 분리는 아래 rate limit 결과로 간접 확인(키가 실제 클라이언트 IP).
+- [ ] 서로 다른 네트워크 2곳에서 업로드 11회씩 → **사람 결정으로 생략**(이 회선 하나뿐). 근거: 키가 실제 클라이언트 IP임은 감사 `client_ip`와 아래 429 결과로 확인됨.
 
 **A-13 / §7-18 413 노출** — ✅
 - [x] curl 12MB → **413 JSON** `FILE_TOO_LARGE`(1.2초). 프록시 HTML·연결 끊김 아님.
